@@ -115,10 +115,23 @@ export function getTenantApiKey(motherId: string, companyName: string = 'Default
   const db = getDb();
 
   const existing = db.prepare('SELECT api_key FROM tenant_api_keys WHERE mother_id = ?').get(normId) as { api_key: string } | undefined;
-  if (existing?.api_key) return existing.api_key;
+  if (existing?.api_key) {
+    if (existing.api_key.startsWith('flm_')) {
+      // Migrate legacy flm_ prefix to polar_
+      const migratedKey = existing.api_key.replace(/^flm_/, 'polar_');
+      try {
+        db.prepare('UPDATE tenant_api_keys SET api_key = ? WHERE mother_id = ?').run(migratedKey, normId);
+        void persistTenantKeyToPostgres({ mother_id: normId, api_key: migratedKey, company_name: companyName.trim() });
+      } catch (err: any) {
+        console.error('[Tenant] Failed to migrate flm_ key to polar_:', err.message);
+      }
+      return migratedKey;
+    }
+    return existing.api_key;
+  }
 
   const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  const generatedKey = `flm_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
+  const generatedKey = `polar_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
 
   db.prepare(`
     INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
@@ -136,7 +149,7 @@ export function regenerateTenantApiKey(motherId: string, companyName: string = '
   const db = getDb();
 
   const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  const generatedKey = `flm_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
+  const generatedKey = `polar_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
 
   db.prepare(`
     INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
@@ -187,9 +200,9 @@ export function resolveTenantFromApiKey(token: string | undefined): { motherId: 
     }
   } catch {}
 
-  // 3. Prefix flm_<motherid>_<secret> match
-  if (trimmed.startsWith('flm_')) {
-    const match = trimmed.match(/^flm_([a-zA-Z0-9_-]+)_[a-f0-9]+$/);
+  // 3. Prefix polar_<motherid>_<secret> or legacy flm_<motherid>_<secret> match
+  if (trimmed.startsWith('polar_') || trimmed.startsWith('flm_')) {
+    const match = trimmed.match(/^(?:polar|flm)_([a-zA-Z0-9_-]+)_[a-f0-9]+$/);
     if (match) {
       const candidateMotherId = normalizeMotherId(match[1]);
       try {
