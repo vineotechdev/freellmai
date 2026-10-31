@@ -60,7 +60,7 @@
     "emailChanged": "E-mailul a fost schimbat.",
     "passwordReset": "Parola a fost resetată. Autentifică-te.",
     "resetCodeDockerHint": "Rulezi în Docker? Codul se află în jurnalul containerului: docker logs <container>.",
-    "desktopSessionFailed": "Panoul de control nu s-a putut autentifica la serverul local. Închide FreeLLMAPI și deschide-l din nou."
+    "desktopSessionFailed": "Panoul de control nu s-a putut autentifica la serverul local. Închide PolarAI și deschide-l din nou."
   },
   "common": {
     "save": "Salvează",
@@ -160,16 +160,16 @@
     "notGitInstall": "Această instalare nu include informații despre commit.",
     "checkFailed": "Nu s-au putut verifica actualizările.",
     "autoUpdateCheck": "Verificare automată a actualizărilor",
-    "restartAfterUpdate": "Repornește FreeLLMAPI după finalizarea compilării.",
+    "restartAfterUpdate": "Repornește PolarAI după finalizarea compilării.",
     "downloadUpdate": "Descarcă actualizarea",
     "downloadingUpdate": "Se descarcă… {percent}%",
     "restartToUpdate": "Repornește pentru actualizare",
-    "updateReadyHint": "Descărcat. FreeLLMAPI face o copie de rezervă a datelor, repornește și deschide noua versiune.",
+    "updateReadyHint": "Descărcat. PolarAI face o copie de rezervă a datelor, repornește și deschide noua versiune.",
     "updateInstallFailed": "Actualizarea nu a putut fi instalată.",
     "updateNow": "Actualizează acum",
-    "updatingContainer": "Se descarcă noua imagine și se repornește. Pagina se reîncarcă când FreeLLMAPI revine.",
+    "updatingContainer": "Se descarcă noua imagine și se repornește. Pagina se reîncarcă când PolarAI revine.",
     "updateNowFailed": "Actualizatorul nu a acceptat cererea. Verifică dacă containerul watchtower rulează.",
-    "updateNowTimeout": "FreeLLMAPI nu a repornit după 5 minute. Verifică jurnalele containerului watchtower."
+    "updateNowTimeout": "PolarAI nu a repornit după 5 minute. Verifică jurnalele containerului watchtower."
   },
   "models": {
     "title": "Modele",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Buget lunar pentru tokenuri",
     "remaining": "rămas",
     "used": "Utilizare",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Este instalată o versiune mai nouă de FreeLLMAPI.",
+    "newBuild": "Este instalată o versiune mai nouă de PolarAI.",
     "reload": "Reîncarcă"
   },
   "freeTier": {

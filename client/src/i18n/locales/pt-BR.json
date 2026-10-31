@@ -60,7 +60,7 @@
     "emailChanged": "E-mail alterado com sucesso.",
     "passwordReset": "Senha redefinida com sucesso. Por favor, entre novamente.",
     "resetCodeDockerHint": "Está usando Docker? O código está no log do contêiner: docker logs <container>.",
-    "desktopSessionFailed": "O painel não conseguiu entrar no servidor local. Feche o FreeLLMAPI e abra-o novamente."
+    "desktopSessionFailed": "O painel não conseguiu entrar no servidor local. Feche o PolarAI e abra-o novamente."
   },
   "common": {
     "save": "Salvar",
@@ -160,16 +160,16 @@
     "notGitInstall": "Esta instalação não inclui informações do commit.",
     "checkFailed": "Não foi possível verificar se há atualizações.",
     "autoUpdateCheck": "Verificação automática de atualizações",
-    "restartAfterUpdate": "Reinicie o FreeLLMAPI após a conclusão da build.",
+    "restartAfterUpdate": "Reinicie o PolarAI após a conclusão da build.",
     "downloadUpdate": "Baixar atualização",
     "downloadingUpdate": "Baixando… {percent}%",
     "restartToUpdate": "Reiniciar para atualizar",
-    "updateReadyHint": "Baixada. O FreeLLMAPI faz backup dos seus dados, reinicia e abre a nova versão.",
+    "updateReadyHint": "Baixada. O PolarAI faz backup dos seus dados, reinicia e abre a nova versão.",
     "updateInstallFailed": "Não foi possível instalar a atualização.",
     "updateNow": "Atualizar agora",
-    "updatingContainer": "Baixando a nova imagem e reiniciando. Esta página recarrega quando o FreeLLMAPI voltar.",
+    "updatingContainer": "Baixando a nova imagem e reiniciando. Esta página recarrega quando o PolarAI voltar.",
     "updateNowFailed": "O atualizador não aceitou a solicitação. Verifique se o contêiner watchtower está em execução.",
-    "updateNowTimeout": "O FreeLLMAPI não reiniciou após 5 minutos. Verifique os logs do contêiner watchtower."
+    "updateNowTimeout": "O PolarAI não reiniciou após 5 minutos. Verifique os logs do contêiner watchtower."
   },
   "models": {
     "title": "Modelos",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Orçamento mensal de tokens",
     "remaining": "restante",
     "used": "usados",
-    "usedScopeHint": "Somente requisições de chat, desde o início deste mês civil, somadas em todos os modelos da cadeia ativa, incluindo endpoints personalizados. O tráfego enviado a um provedor fora do FreeLLMAPI não é contado.",
+    "usedScopeHint": "Somente requisições de chat, desde o início deste mês civil, somadas em todos os modelos da cadeia ativa, incluindo endpoints personalizados. O tráfego enviado a um provedor fora do PolarAI não é contado.",
     "legendRemainingTitle": "Restante / orçamento mensal de {name} ({platform})",
     "noPublishedQuota": "+{count} sem cota publicada",
     "noPublishedQuotaTitle": "Esses modelos não têm orçamento mensal de tokens documentado, então não há restante a exibir.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Uma versão mais recente do FreeLLMAPI está instalada.",
+    "newBuild": "Uma versão mais recente do PolarAI está instalada.",
     "reload": "Recarregar"
   },
   "freeTier": {

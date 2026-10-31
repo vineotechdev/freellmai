@@ -1,7 +1,7 @@
 /**
  * llmai_constant.ts (Frontend Client)
  *
- * Central configuration constants for FreeLLMAPI Client.
+ * Central configuration constants for PolarAI Client.
  * When hosting the backend on a separate server (e.g. Render, Railway, VPS, EC2),
  * set your backend URL below, or set VITE_BACKEND_URL in your environment.
  */
@@ -13,7 +13,7 @@ export const HARDCODED_BACKEND_URL: string = '';
 /**
  * Resolves the configured backend server URL.
  * Priority:
- * 1. localStorage override ('freellmai_backend_url')
+ * 1. localStorage override ('polarai_backend_url' or 'freellmai_backend_url')
  * 2. HARDCODED_BACKEND_URL (defined above)
  * 3. Environment variables (VITE_BACKEND_URL, VITE_API_BASE_URL, VITE_API_URL)
  * 4. Empty string '' (meaning relative same-origin / proxy)
@@ -21,7 +21,7 @@ export const HARDCODED_BACKEND_URL: string = '';
 export function getBackendBaseUrl(): string {
   if (typeof window !== 'undefined') {
     try {
-      const stored = localStorage.getItem('freellmai_backend_url');
+      const stored = localStorage.getItem('polarai_backend_url') || localStorage.getItem('freellmai_backend_url');
       if (stored && stored.trim()) {
         return stored.trim().replace(/\/$/, '');
       }

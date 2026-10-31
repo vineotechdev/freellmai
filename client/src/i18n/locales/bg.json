@@ -60,7 +60,7 @@
     "emailChanged": "Имейлът е сменен.",
     "passwordReset": "Паролата е нулирана. Влезте отново.",
     "resetCodeDockerHint": "Работите в Docker? Кодът е в лога на контейнера: docker logs <container>.",
-    "desktopSessionFailed": "Таблото не успя да влезе в локалния сървър. Затворете FreeLLMAPI и го отворете отново."
+    "desktopSessionFailed": "Таблото не успя да влезе в локалния сървър. Затворете PolarAI и го отворете отново."
   },
   "common": {
     "save": "Запази",
@@ -160,16 +160,16 @@
     "notGitInstall": "Тази инсталация не съдържа информация за commit.",
     "checkFailed": "Актуализациите не можаха да бъдат проверени.",
     "autoUpdateCheck": "Автоматична проверка за актуализации",
-    "restartAfterUpdate": "Рестартирайте FreeLLMAPI след завършване на компилацията.",
+    "restartAfterUpdate": "Рестартирайте PolarAI след завършване на компилацията.",
     "downloadUpdate": "Изтегли актуализацията",
     "downloadingUpdate": "Изтегляне… {percent}%",
     "restartToUpdate": "Рестартирай за актуализиране",
-    "updateReadyHint": "Изтеглено. FreeLLMAPI архивира данните ви, рестартира и отваря новата версия.",
+    "updateReadyHint": "Изтеглено. PolarAI архивира данните ви, рестартира и отваря новата версия.",
     "updateInstallFailed": "Актуализацията не можа да се инсталира.",
     "updateNow": "Актуализирай сега",
-    "updatingContainer": "Изтегля се новият образ и се рестартира. Страницата ще се презареди, когато FreeLLMAPI се върне.",
+    "updatingContainer": "Изтегля се новият образ и се рестартира. Страницата ще се презареди, когато PolarAI се върне.",
     "updateNowFailed": "Актуализаторът не прие заявката. Проверете дали контейнерът watchtower работи.",
-    "updateNowTimeout": "FreeLLMAPI не се е рестартирал след 5 минути. Проверете логовете на контейнера watchtower."
+    "updateNowTimeout": "PolarAI не се е рестартирал след 5 минути. Проверете логовете на контейнера watchtower."
   },
   "models": {
     "title": "Модели",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Месечен бюджет за жетони",
     "remaining": "Останали",
     "used": "Употребявана",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Инсталирана е по-нова версия на FreeLLMAPI.",
+    "newBuild": "Инсталирана е по-нова версия на PolarAI.",
     "reload": "Презареди"
   },
   "freeTier": {

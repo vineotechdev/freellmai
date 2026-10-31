@@ -60,7 +60,7 @@
     "emailChanged": "تم تغيير البريد الإلكتروني بنجاح.",
     "passwordReset": "تمت إعادة تعيين كلمة المرور. يرجى تسجيل الدخول.",
     "resetCodeDockerHint": "هل تعمل داخل Docker؟ الرمز موجود في سجل الحاوية: docker logs <container>.",
-    "desktopSessionFailed": "تعذّر على لوحة التحكم تسجيل الدخول إلى الخادم المحلي. أغلق FreeLLMAPI ثم افتحه من جديد."
+    "desktopSessionFailed": "تعذّر على لوحة التحكم تسجيل الدخول إلى الخادم المحلي. أغلق PolarAI ثم افتحه من جديد."
   },
   "common": {
     "save": "حفظ",
@@ -160,16 +160,16 @@
     "notGitInstall": "لا يتضمن هذا التثبيت معلومات الالتزام.",
     "checkFailed": "تعذر التحقق من وجود تحديثات.",
     "autoUpdateCheck": "التحقق التلقائي من التحديثات",
-    "restartAfterUpdate": "أعد تشغيل FreeLLMAPI بعد اكتمال البنية.",
+    "restartAfterUpdate": "أعد تشغيل PolarAI بعد اكتمال البنية.",
     "downloadUpdate": "تنزيل التحديث",
     "downloadingUpdate": "جارٍ التنزيل… {percent}%",
     "restartToUpdate": "أعد التشغيل للتحديث",
-    "updateReadyHint": "اكتمل التنزيل. يحفظ FreeLLMAPI نسخة احتياطية من بياناتك ثم يعيد التشغيل ويفتح الإصدار الجديد.",
+    "updateReadyHint": "اكتمل التنزيل. يحفظ PolarAI نسخة احتياطية من بياناتك ثم يعيد التشغيل ويفتح الإصدار الجديد.",
     "updateInstallFailed": "تعذّر تثبيت التحديث.",
     "updateNow": "حدّث الآن",
-    "updatingContainer": "جارٍ سحب الصورة الجديدة وإعادة التشغيل. ستُعاد تحميل هذه الصفحة عند عودة FreeLLMAPI.",
+    "updatingContainer": "جارٍ سحب الصورة الجديدة وإعادة التشغيل. ستُعاد تحميل هذه الصفحة عند عودة PolarAI.",
     "updateNowFailed": "لم يقبل المحدِّث الطلب. تحقّق من أن حاوية watchtower تعمل.",
-    "updateNowTimeout": "لم يُعد FreeLLMAPI التشغيل بعد 5 دقائق. راجع سجلات حاوية watchtower."
+    "updateNowTimeout": "لم يُعد PolarAI التشغيل بعد 5 دقائق. راجع سجلات حاوية watchtower."
   },
   "models": {
     "title": "نماذج",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "ميزانية الرمز الشهرية",
     "remaining": "المتبقية",
     "used": "تستخدم",
-    "usedScopeHint": "طلبات المحادثة فقط، منذ بداية هذا الشهر الميلادي، مجمَّعة عبر كل النماذج في السلسلة النشطة — بما في ذلك النقاط المخصّصة. لا تُحتسب حركة المرور التي ترسلها إلى مزوّد خارج FreeLLMAPI.",
+    "usedScopeHint": "طلبات المحادثة فقط، منذ بداية هذا الشهر الميلادي، مجمَّعة عبر كل النماذج في السلسلة النشطة — بما في ذلك النقاط المخصّصة. لا تُحتسب حركة المرور التي ترسلها إلى مزوّد خارج PolarAI.",
     "legendRemainingTitle": "المتبقي / الميزانية الشهرية لـ {name} ({platform})",
     "noPublishedQuota": "+{count} بلا حصة منشورة",
     "noPublishedQuotaTitle": "هذه النماذج ليس لها ميزانية رموز شهرية موثّقة، لذا لا يوجد متبقٍ لعرضه.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "تم تثبيت إصدار أحدث من FreeLLMAPI.",
+    "newBuild": "تم تثبيت إصدار أحدث من PolarAI.",
     "reload": "إعادة التحميل"
   },
   "freeTier": {

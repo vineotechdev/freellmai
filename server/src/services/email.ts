@@ -52,7 +52,7 @@ function getTransporter(): Transporter | null {
  */
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; delivered: boolean; error?: string }> {
   const mailer = getTransporter();
-  const from = process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || '"FreeLLM AI" <no-reply@polarlist.in>';
+  const from = process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || '"PolarAI" <no-reply@polarlist.in>';
 
   if (mailer) {
     try {
@@ -92,10 +92,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
  * Sends a password reset code to a user's email address.
  */
 export async function sendPasswordResetEmail(email: string, resetCode: string): Promise<boolean> {
-  const subject = 'Your FreeLLM AI Password Reset Code';
+  const subject = 'Your PolarAI Password Reset Code';
   const text = `Hello,
 
-We received a request to reset your password for your FreeLLM AI account (${email}).
+We received a request to reset your password for your PolarAI account (${email}).
 
 Your password reset code is: ${resetCode}
 
@@ -103,7 +103,7 @@ This code will expire in 15 minutes. Enter this code on the password reset scree
 
 If you did not request a password reset, you can safely ignore this email.
 
-— The FreeLLM AI Team`;
+— The PolarAI Team`;
 
   const html = `
 <!DOCTYPE html>
@@ -115,7 +115,7 @@ If you did not request a password reset, you can safely ignore this email.
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px;">
   <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
     <div style="background-color: #0f172a; padding: 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em;">FreeLLM AI</h1>
+      <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em;">PolarAI</h1>
     </div>
     <div style="padding: 32px 28px;">
       <h2 style="font-size: 18px; font-weight: 600; color: #1e293b; margin-top: 0; margin-bottom: 12px;">Password Reset Request</h2>

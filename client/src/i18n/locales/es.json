@@ -60,7 +60,7 @@
     "emailChanged": "Correo electrónico cambiado correctamente.",
     "passwordReset": "Contraseña restablecida correctamente. Por favor, inicia sesión.",
     "resetCodeDockerHint": "¿Usas Docker? El código está en el registro del contenedor: docker logs <container>.",
-    "desktopSessionFailed": "El panel no pudo iniciar sesión en el servidor local. Cierra FreeLLMAPI y vuelve a abrirlo."
+    "desktopSessionFailed": "El panel no pudo iniciar sesión en el servidor local. Cierra PolarAI y vuelve a abrirlo."
   },
   "common": {
     "save": "Guardar",
@@ -160,16 +160,16 @@
     "notGitInstall": "Esta instalación no incluye información de commits.",
     "checkFailed": "No se pudo comprobar si hay actualizaciones.",
     "autoUpdateCheck": "Comprobación automática de actualizaciones",
-    "restartAfterUpdate": "Reinicia FreeLLMAPI cuando finalice la compilación.",
+    "restartAfterUpdate": "Reinicia PolarAI cuando finalice la compilación.",
     "downloadUpdate": "Descargar actualización",
     "downloadingUpdate": "Descargando… {percent} %",
     "restartToUpdate": "Reiniciar para actualizar",
-    "updateReadyHint": "Descargada. FreeLLMAPI hace una copia de seguridad de tus datos, se reinicia y abre la nueva versión.",
+    "updateReadyHint": "Descargada. PolarAI hace una copia de seguridad de tus datos, se reinicia y abre la nueva versión.",
     "updateInstallFailed": "No se pudo instalar la actualización.",
     "updateNow": "Actualizar ahora",
-    "updatingContainer": "Descargando la nueva imagen y reiniciando. Esta página se recargará cuando FreeLLMAPI vuelva.",
+    "updatingContainer": "Descargando la nueva imagen y reiniciando. Esta página se recargará cuando PolarAI vuelva.",
     "updateNowFailed": "El actualizador no aceptó la solicitud. Comprueba que el contenedor watchtower está en marcha.",
-    "updateNowTimeout": "FreeLLMAPI no se ha reiniciado tras 5 minutos. Revisa los registros del contenedor watchtower."
+    "updateNowTimeout": "PolarAI no se ha reiniciado tras 5 minutos. Revisa los registros del contenedor watchtower."
   },
   "models": {
     "title": "Modelos",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Presupuesto mensual de tokens",
     "remaining": "restante",
     "used": "usados",
-    "usedScopeHint": "Solo solicitudes de chat, desde el inicio de este mes natural, sumadas sobre todos los modelos de la cadena activa, incluidos los endpoints personalizados. El tráfico que envías a un proveedor fuera de FreeLLMAPI no se cuenta.",
+    "usedScopeHint": "Solo solicitudes de chat, desde el inicio de este mes natural, sumadas sobre todos los modelos de la cadena activa, incluidos los endpoints personalizados. El tráfico que envías a un proveedor fuera de PolarAI no se cuenta.",
     "legendRemainingTitle": "Restante / presupuesto mensual de {name} ({platform})",
     "noPublishedQuota": "+{count} sin cuota publicada",
     "noPublishedQuotaTitle": "Estos modelos no tienen un presupuesto mensual de tokens documentado, así que no hay restante que mostrar.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Hay una versión más reciente de FreeLLMAPI instalada.",
+    "newBuild": "Hay una versión más reciente de PolarAI instalada.",
     "reload": "Recargar"
   },
   "freeTier": {

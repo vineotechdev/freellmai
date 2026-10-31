@@ -60,7 +60,7 @@
     "emailChanged": "ଇମେଲ ସଫଳତାର ସହ ବଦଳିଲା।",
     "passwordReset": "ପାସୱାର୍ଡ ରିସେଟ ହେଲା। ଦୟାକରି ସାଇନ ଇନ କରନ୍ତୁ।",
     "resetCodeDockerHint": "Docker ରେ ଚଳାଉଛନ୍ତି କି? କୋଡ କଣ୍ଟେନର ଲଗରେ ଅଛି: docker logs <container>।",
-    "desktopSessionFailed": "ଡ୍ୟାସବୋର୍ଡ ଲୋକାଲ ସର୍ଭରରେ ସାଇନ ଇନ କରିପାରିଲା ନାହିଁ। FreeLLMAPI ବନ୍ଦ କରି ପୁଣି ଖୋଲନ୍ତୁ।"
+    "desktopSessionFailed": "ଡ୍ୟାସବୋର୍ଡ ଲୋକାଲ ସର୍ଭରରେ ସାଇନ ଇନ କରିପାରିଲା ନାହିଁ। PolarAI ବନ୍ଦ କରି ପୁଣି ଖୋଲନ୍ତୁ।"
   },
   "common": {
     "save": "ସଞ୍ଚୟ କରନ୍ତୁ",
@@ -160,16 +160,16 @@
     "notGitInstall": "ଏହି ଇନ୍‌ଷ୍ଟଲେସନ୍‌ରେ commit ସୂଚନା ନାହିଁ।",
     "checkFailed": "ଅପଡେଟ୍ ଯାଞ୍ଚ କରାଯାଇପାରିଲା ନାହିଁ।",
     "autoUpdateCheck": "ସ୍ୱୟଂଚାଳିତ ଅପଡେଟ୍ ଯାଞ୍ଚ",
-    "restartAfterUpdate": "ବିଲ୍ଡ ସମ୍ପୂର୍ଣ୍ଣ ହେବା ପରେ FreeLLMAPI ପୁନଃ ଚାଲୁ କରନ୍ତୁ।",
+    "restartAfterUpdate": "ବିଲ୍ଡ ସମ୍ପୂର୍ଣ୍ଣ ହେବା ପରେ PolarAI ପୁନଃ ଚାଲୁ କରନ୍ତୁ।",
     "downloadUpdate": "ଅପଡେଟ୍ ଡାଉନଲୋଡ୍ କରନ୍ତୁ",
     "downloadingUpdate": "ଡାଉନଲୋଡ୍ ହେଉଛି… {percent}%",
     "restartToUpdate": "ଅପଡେଟ୍ ପାଇଁ ପୁନଃ ଆରମ୍ଭ କରନ୍ତୁ",
-    "updateReadyHint": "ଡାଉନଲୋଡ୍ ହୋଇଗଲା। FreeLLMAPI ଆପଣଙ୍କ ଡାଟାର ବ୍ୟାକଅପ୍ ନେଇ, ପୁନଃ ଆରମ୍ଭ ହୋଇ ନୂଆ ସଂସ୍କରଣ ଖୋଲେ।",
+    "updateReadyHint": "ଡାଉନଲୋଡ୍ ହୋଇଗଲା। PolarAI ଆପଣଙ୍କ ଡାଟାର ବ୍ୟାକଅପ୍ ନେଇ, ପୁନଃ ଆରମ୍ଭ ହୋଇ ନୂଆ ସଂସ୍କରଣ ଖୋଲେ।",
     "updateInstallFailed": "ଅପଡେଟ୍ ଇନଷ୍ଟଲ୍ ହୋଇପାରିଲା ନାହିଁ।",
     "updateNow": "ବର୍ତ୍ତମାନ ଅପଡେଟ୍ କରନ୍ତୁ",
-    "updatingContainer": "ନୂଆ ଇମେଜ୍ ଟାଣାଯାଉଛି ଏବଂ ପୁନଃ ଆରମ୍ଭ ହେଉଛି। FreeLLMAPI ଫେରିଲେ ଏହି ପୃଷ୍ଠା ପୁନଃ ଲୋଡ୍ ହେବ।",
+    "updatingContainer": "ନୂଆ ଇମେଜ୍ ଟାଣାଯାଉଛି ଏବଂ ପୁନଃ ଆରମ୍ଭ ହେଉଛି। PolarAI ଫେରିଲେ ଏହି ପୃଷ୍ଠା ପୁନଃ ଲୋଡ୍ ହେବ।",
     "updateNowFailed": "ଅପଡେଟର ଅନୁରୋଧ ଗ୍ରହଣ କଲା ନାହିଁ। watchtower କଣ୍ଟେନର ଚାଲୁଛି କି ନାହିଁ ଯାଞ୍ଚ କରନ୍ତୁ।",
-    "updateNowTimeout": "୫ ମିନିଟ ପରେ ମଧ୍ୟ FreeLLMAPI ପୁନଃ ଆରମ୍ଭ ହୋଇନାହିଁ। watchtower କଣ୍ଟେନରର ଲଗ୍ ଦେଖନ୍ତୁ।"
+    "updateNowTimeout": "୫ ମିନିଟ ପରେ ମଧ୍ୟ PolarAI ପୁନଃ ଆରମ୍ଭ ହୋଇନାହିଁ। watchtower କଣ୍ଟେନରର ଲଗ୍ ଦେଖନ୍ତୁ।"
   },
   "models": {
     "title": "ମଡେଲଗୁଡିକ",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "ମାସିକ ଟୋକେନ୍ ବଜେଟ୍",
     "remaining": "ଅବଶିଷ୍ଟ",
     "used": "ବ୍ୟବହୃତ",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "FreeLLMAPI ର ନୂଆ ସଂସ୍କରଣ ଇନଷ୍ଟଲ୍ ହୋଇଛି।",
+    "newBuild": "PolarAI ର ନୂଆ ସଂସ୍କରଣ ଇନଷ୍ଟଲ୍ ହୋଇଛି।",
     "reload": "ପୁନଃ ଲୋଡ୍"
   },
   "freeTier": {

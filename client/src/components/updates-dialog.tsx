@@ -109,7 +109,7 @@ function UpdatesContent() {
   }
 
   const version = shellVersion ?? result?.version ?? serverVersion
-  const subtitle = version ? `FreeLLMAPI v${version}` : result?.localSha ? `FreeLLMAPI ${result.localSha}` : 'FreeLLMAPI'
+  const subtitle = version ? `PolarAI v${version}` : result?.localSha ? `PolarAI ${result.localSha}` : 'PolarAI'
   const releaseNotes = (
     <a href={RELEASES_URL} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-0.5 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
       {t('updates.releaseNotes')}

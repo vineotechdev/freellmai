@@ -60,7 +60,7 @@
     "emailChanged": "メールアドレスを変更しました。",
     "passwordReset": "パスワードをリセットしました。ログインしてください。",
     "resetCodeDockerHint": "Docker で実行中ですか？コードはコンテナのログにあります: docker logs <container>",
-    "desktopSessionFailed": "ダッシュボードがローカルサーバーにサインインできませんでした。FreeLLMAPI を終了して開き直してください。"
+    "desktopSessionFailed": "ダッシュボードがローカルサーバーにサインインできませんでした。PolarAI を終了して開き直してください。"
   },
   "common": {
     "save": "保存",
@@ -160,16 +160,16 @@
     "notGitInstall": "このインストールにはコミット情報が含まれていません。",
     "checkFailed": "アップデートを確認できませんでした。",
     "autoUpdateCheck": "自動アップデートチェック",
-    "restartAfterUpdate": "ビルド完了後にFreeLLMAPIを再起動してください。",
+    "restartAfterUpdate": "ビルド完了後にPolarAIを再起動してください。",
     "downloadUpdate": "アップデートをダウンロード",
     "downloadingUpdate": "ダウンロード中… {percent}%",
     "restartToUpdate": "再起動してアップデート",
-    "updateReadyHint": "ダウンロード完了。FreeLLMAPI はデータをバックアップしてから再起動し、新しいバージョンを開きます。",
+    "updateReadyHint": "ダウンロード完了。PolarAI はデータをバックアップしてから再起動し、新しいバージョンを開きます。",
     "updateInstallFailed": "アップデートをインストールできませんでした。",
     "updateNow": "今すぐアップデート",
-    "updatingContainer": "新しいイメージを取得して再起動しています。FreeLLMAPI が戻るとこのページは再読み込みされます。",
+    "updatingContainer": "新しいイメージを取得して再起動しています。PolarAI が戻るとこのページは再読み込みされます。",
     "updateNowFailed": "アップデーターがリクエストを受け付けませんでした。watchtower コンテナが動いているか確認してください。",
-    "updateNowTimeout": "5 分経っても FreeLLMAPI が再起動していません。watchtower コンテナのログを確認してください。"
+    "updateNowTimeout": "5 分経っても PolarAI が再起動していません。watchtower コンテナのログを確認してください。"
   },
   "models": {
     "title": "モデル",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "月間トークン予算",
     "remaining": "残り",
     "used": "使用済み",
-    "usedScopeHint": "今月（暦月）の開始以降のチャットリクエストのみを、アクティブなチェーン内のすべてのモデル（カスタムエンドポイントを含む）について合計しています。FreeLLMAPI を介さずにプロバイダーへ送信したトラフィックは含まれません。",
+    "usedScopeHint": "今月（暦月）の開始以降のチャットリクエストのみを、アクティブなチェーン内のすべてのモデル（カスタムエンドポイントを含む）について合計しています。PolarAI を介さずにプロバイダーへ送信したトラフィックは含まれません。",
     "legendRemainingTitle": "{name}（{platform}）の残量 / 月間予算",
     "noPublishedQuota": "他に {count} 件（公開クォータなし）",
     "noPublishedQuotaTitle": "これらのモデルには月間トークン予算が公開されていないため、残量を表示できません。",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "新しいバージョンの FreeLLMAPI がインストールされています。",
+    "newBuild": "新しいバージョンの PolarAI がインストールされています。",
     "reload": "再読み込み"
   },
   "freeTier": {

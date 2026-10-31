@@ -60,7 +60,7 @@
     "emailChanged": "電子郵件已成功變更。",
     "passwordReset": "密碼已重設，請重新登入。",
     "resetCodeDockerHint": "在 Docker 中執行？重設碼在容器日誌中：docker logs <container>",
-    "desktopSessionFailed": "儀表板無法登入本機伺服器。請結束 FreeLLMAPI 並重新開啟。"
+    "desktopSessionFailed": "儀表板無法登入本機伺服器。請結束 PolarAI 並重新開啟。"
   },
   "common": {
     "save": "儲存",
@@ -160,16 +160,16 @@
     "notGitInstall": "此安裝不包含 commit 資訊。",
     "checkFailed": "無法檢查更新。",
     "autoUpdateCheck": "自動檢查更新",
-    "restartAfterUpdate": "建置完成後重新啟動 FreeLLMAPI。",
+    "restartAfterUpdate": "建置完成後重新啟動 PolarAI。",
     "downloadUpdate": "下載更新",
     "downloadingUpdate": "正在下載… {percent}%",
     "restartToUpdate": "重新啟動以更新",
-    "updateReadyHint": "已下載。FreeLLMAPI 會先備份你的資料，然後重新啟動並開啟新版本。",
+    "updateReadyHint": "已下載。PolarAI 會先備份你的資料，然後重新啟動並開啟新版本。",
     "updateInstallFailed": "無法安裝更新。",
     "updateNow": "立即更新",
-    "updatingContainer": "正在拉取新映像並重新啟動。FreeLLMAPI 恢復後此頁面會自動重新載入。",
+    "updatingContainer": "正在拉取新映像並重新啟動。PolarAI 恢復後此頁面會自動重新載入。",
     "updateNowFailed": "更新器未接受請求。請確認 watchtower 容器正在執行。",
-    "updateNowTimeout": "5 分鐘後 FreeLLMAPI 仍未重新啟動。請查看 watchtower 容器的記錄。"
+    "updateNowTimeout": "5 分鐘後 PolarAI 仍未重新啟動。請查看 watchtower 容器的記錄。"
   },
   "models": {
     "title": "模型",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "每月 Token 額度",
     "remaining": "剩餘",
     "used": "已用",
-    "usedScopeHint": "僅統計本月內的聊天請求，涵蓋目前鏈路中的所有模型（包含自訂端點）。繞過 FreeLLMAPI 直接送往服務商的流量不計入。",
+    "usedScopeHint": "僅統計本月內的聊天請求，涵蓋目前鏈路中的所有模型（包含自訂端點）。繞過 PolarAI 直接送往服務商的流量不計入。",
     "legendRemainingTitle": "{name}（{platform}）的剩餘量 / 每月額度",
     "noPublishedQuota": "另有 {count} 個未公布額度",
     "noPublishedQuotaTitle": "這些模型未公布每月權杖額度，因此無法顯示剩餘量。",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "发现新版本",
     "dismiss": "忽略",
-    "newBuild": "已安裝較新版本的 FreeLLMAPI。",
+    "newBuild": "已安裝較新版本的 PolarAI。",
     "reload": "重新載入"
   },
   "freeTier": {

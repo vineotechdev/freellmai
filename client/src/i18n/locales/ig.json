@@ -60,7 +60,7 @@
     "emailChanged": "Agbanwela ozi-e.",
     "passwordReset": "Atọghatala okwuntughe. Biko banye.",
     "resetCodeDockerHint": "Ị na-agba na Docker? Koodu ahụ dị na ndekọ kọntetina: docker logs <container>.",
-    "desktopSessionFailed": "Dashboard enweghị ike ịbanye na sava mpaghara. Mechie FreeLLMAPI ma mepee ya ọzọ."
+    "desktopSessionFailed": "Dashboard enweghị ike ịbanye na sava mpaghara. Mechie PolarAI ma mepee ya ọzọ."
   },
   "common": {
     "save": "Chekwa",
@@ -160,16 +160,16 @@
     "notGitInstall": "Nwụnye a enweghị ozi commit.",
     "checkFailed": "Enweghị ike ịlele mmelite.",
     "autoUpdateCheck": "Nyocha mmelite akpaaka",
-    "restartAfterUpdate": "Malitegharịa FreeLLMAPI mgbe build ahụ gwụchara.",
+    "restartAfterUpdate": "Malitegharịa PolarAI mgbe build ahụ gwụchara.",
     "downloadUpdate": "Budata mmelite",
     "downloadingUpdate": "Na-ebudata… {percent}%",
     "restartToUpdate": "Malitegharịa ka imelite",
-    "updateReadyHint": "Ebudatala. FreeLLMAPI na-echekwa data gị, malitegharịa ma mepee ụdị ọhụrụ.",
+    "updateReadyHint": "Ebudatala. PolarAI na-echekwa data gị, malitegharịa ma mepee ụdị ọhụrụ.",
     "updateInstallFailed": "Enweghị ike itinye mmelite ahụ.",
     "updateNow": "Melite ugbu a",
-    "updatingContainer": "Na-adọta onyonyo ọhụrụ ma na-amalitegharị. Ibe a ga-ebugharị mgbe FreeLLMAPI lọghachiri.",
+    "updatingContainer": "Na-adọta onyonyo ọhụrụ ma na-amalitegharị. Ibe a ga-ebugharị mgbe PolarAI lọghachiri.",
     "updateNowFailed": "Onye mmelite anabataghị arịrịọ ahụ. Lelee ma akpa watchtower na-arụ ọrụ.",
-    "updateNowTimeout": "FreeLLMAPI amalitegharịbeghị mgbe nkeji 5 gachara. Lelee ndekọ akpa watchtower."
+    "updateNowTimeout": "PolarAI amalitegharịbeghị mgbe nkeji 5 gachara. Lelee ndekọ akpa watchtower."
   },
   "models": {
     "title": "Ụdị",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Ego mmefu ego kwa ọnwa",
     "remaining": "fọdụrụnụ",
     "used": "eji",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Etinyela ụdị FreeLLMAPI ọhụrụ.",
+    "newBuild": "Etinyela ụdị PolarAI ọhụrụ.",
     "reload": "Bugharịa"
   },
   "freeTier": {

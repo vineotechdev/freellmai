@@ -60,7 +60,7 @@
     "emailChanged": "An canza imel.",
     "passwordReset": "An sake saita kalmar sirri. Da fatan shiga.",
     "resetCodeDockerHint": "Kana amfani da Docker? Lambar tana cikin tarihin kwantena: docker logs <container>.",
-    "desktopSessionFailed": "Dashboard ɗin bai iya shiga uwar garken gida ba. Rufe FreeLLMAPI ka sake buɗe shi."
+    "desktopSessionFailed": "Dashboard ɗin bai iya shiga uwar garken gida ba. Rufe PolarAI ka sake buɗe shi."
   },
   "common": {
     "save": "Ajiye",
@@ -160,16 +160,16 @@
     "notGitInstall": "Wannan shigarwar ba ta ƙunshi bayanan commit ba.",
     "checkFailed": "Ba a iya bincika sabuntawa ba.",
     "autoUpdateCheck": "Duba sabuntawa ta atomatik",
-    "restartAfterUpdate": "Sake kunna FreeLLMAPI bayan an gama build ɗin.",
+    "restartAfterUpdate": "Sake kunna PolarAI bayan an gama build ɗin.",
     "downloadUpdate": "Sauke sabuntawa",
     "downloadingUpdate": "Ana saukewa… {percent}%",
     "restartToUpdate": "Sake farawa don sabuntawa",
-    "updateReadyHint": "An sauke. FreeLLMAPI yana adana bayananka, sai ya sake farawa ya buɗe sabon sigar.",
+    "updateReadyHint": "An sauke. PolarAI yana adana bayananka, sai ya sake farawa ya buɗe sabon sigar.",
     "updateInstallFailed": "Ba a iya shigar da sabuntawar ba.",
     "updateNow": "Sabunta yanzu",
-    "updatingContainer": "Ana jan sabon hoto ana sake farawa. Wannan shafin zai sake lodawa idan FreeLLMAPI ya dawo.",
+    "updatingContainer": "Ana jan sabon hoto ana sake farawa. Wannan shafin zai sake lodawa idan PolarAI ya dawo.",
     "updateNowFailed": "Mai sabuntawa bai karɓi buƙatar ba. Duba ko kwantena watchtower yana aiki.",
-    "updateNowTimeout": "FreeLLMAPI bai sake farawa ba bayan minti 5. Duba bayanan log na kwantena watchtower."
+    "updateNowTimeout": "PolarAI bai sake farawa ba bayan minti 5. Duba bayanan log na kwantena watchtower."
   },
   "models": {
     "title": "Samfura",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Kasafin kudin alamar wata-wata",
     "remaining": "saura",
     "used": "amfani",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "An shigar da sabon sigar FreeLLMAPI.",
+    "newBuild": "An shigar da sabon sigar PolarAI.",
     "reload": "Sake lodawa"
   },
   "freeTier": {

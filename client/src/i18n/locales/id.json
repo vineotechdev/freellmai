@@ -60,7 +60,7 @@
     "emailChanged": "E-mail berhasil diubah.",
     "passwordReset": "Kata sandi telah direset. Silakan masuk.",
     "resetCodeDockerHint": "Menjalankan di Docker? Kode ada di log container: docker logs <container>.",
-    "desktopSessionFailed": "Dasbor tidak dapat masuk ke server lokal. Tutup FreeLLMAPI lalu buka lagi."
+    "desktopSessionFailed": "Dasbor tidak dapat masuk ke server lokal. Tutup PolarAI lalu buka lagi."
   },
   "common": {
     "save": "Simpan",
@@ -160,16 +160,16 @@
     "notGitInstall": "Instalasi ini tidak menyertakan informasi commit.",
     "checkFailed": "Tidak dapat memeriksa pembaruan.",
     "autoUpdateCheck": "Pemeriksaan pembaruan otomatis",
-    "restartAfterUpdate": "Mulai ulang FreeLLMAPI setelah proses build selesai.",
+    "restartAfterUpdate": "Mulai ulang PolarAI setelah proses build selesai.",
     "downloadUpdate": "Unduh pembaruan",
     "downloadingUpdate": "Mengunduh… {percent}%",
     "restartToUpdate": "Mulai ulang untuk memperbarui",
-    "updateReadyHint": "Selesai diunduh. FreeLLMAPI mencadangkan data Anda, memulai ulang, lalu membuka versi baru.",
+    "updateReadyHint": "Selesai diunduh. PolarAI mencadangkan data Anda, memulai ulang, lalu membuka versi baru.",
     "updateInstallFailed": "Pembaruan tidak dapat dipasang.",
     "updateNow": "Perbarui sekarang",
-    "updatingContainer": "Menarik image baru dan memulai ulang. Halaman ini dimuat ulang saat FreeLLMAPI kembali.",
+    "updatingContainer": "Menarik image baru dan memulai ulang. Halaman ini dimuat ulang saat PolarAI kembali.",
     "updateNowFailed": "Pembaru tidak menerima permintaan. Pastikan kontainer watchtower berjalan.",
-    "updateNowTimeout": "FreeLLMAPI belum dimulai ulang setelah 5 menit. Periksa log kontainer watchtower."
+    "updateNowTimeout": "PolarAI belum dimulai ulang setelah 5 menit. Periksa log kontainer watchtower."
   },
   "models": {
     "title": "Model",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Anggaran token bulanan",
     "remaining": "tersisa",
     "used": "digunakan",
-    "usedScopeHint": "Hanya permintaan chat, sejak awal bulan kalender ini, dijumlahkan atas semua model dalam rantai aktif — termasuk endpoint kustom. Lalu lintas yang Anda kirim ke penyedia di luar FreeLLMAPI tidak dihitung.",
+    "usedScopeHint": "Hanya permintaan chat, sejak awal bulan kalender ini, dijumlahkan atas semua model dalam rantai aktif — termasuk endpoint kustom. Lalu lintas yang Anda kirim ke penyedia di luar PolarAI tidak dihitung.",
     "legendRemainingTitle": "Sisa / anggaran bulanan untuk {name} ({platform})",
     "noPublishedQuota": "+{count} tanpa kuota yang dipublikasikan",
     "noPublishedQuotaTitle": "Model-model ini tidak memiliki anggaran token bulanan yang terdokumentasi, jadi tidak ada sisa yang bisa ditampilkan.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Versi FreeLLMAPI yang lebih baru telah terpasang.",
+    "newBuild": "Versi PolarAI yang lebih baru telah terpasang.",
     "reload": "Muat ulang"
   },
   "freeTier": {

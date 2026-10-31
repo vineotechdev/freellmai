@@ -60,7 +60,7 @@
     "emailChanged": "E-postadressen har bytts.",
     "passwordReset": "Lösenordet återställt. Logga in.",
     "resetCodeDockerHint": "Kör du i Docker? Koden finns i containerloggen: docker logs <container>.",
-    "desktopSessionFailed": "Instrumentpanelen kunde inte logga in på den lokala servern. Avsluta FreeLLMAPI och öppna det igen."
+    "desktopSessionFailed": "Instrumentpanelen kunde inte logga in på den lokala servern. Avsluta PolarAI och öppna det igen."
   },
   "common": {
     "save": "Spara",
@@ -160,16 +160,16 @@
     "notGitInstall": "Den här installationen innehåller ingen commit-information.",
     "checkFailed": "Det gick inte att söka efter uppdateringar.",
     "autoUpdateCheck": "Automatisk uppdateringskontroll",
-    "restartAfterUpdate": "Starta om FreeLLMAPI när bygget är klart.",
+    "restartAfterUpdate": "Starta om PolarAI när bygget är klart.",
     "downloadUpdate": "Hämta uppdatering",
     "downloadingUpdate": "Hämtar… {percent} %",
     "restartToUpdate": "Starta om för att uppdatera",
-    "updateReadyHint": "Hämtad. FreeLLMAPI säkerhetskopierar dina data, startar om och öppnar den nya versionen.",
+    "updateReadyHint": "Hämtad. PolarAI säkerhetskopierar dina data, startar om och öppnar den nya versionen.",
     "updateInstallFailed": "Uppdateringen kunde inte installeras.",
     "updateNow": "Uppdatera nu",
-    "updatingContainer": "Hämtar den nya avbildningen och startar om. Sidan laddas om när FreeLLMAPI är tillbaka.",
+    "updatingContainer": "Hämtar den nya avbildningen och startar om. Sidan laddas om när PolarAI är tillbaka.",
     "updateNowFailed": "Uppdateraren tog inte emot begäran. Kontrollera att watchtower-containern körs.",
-    "updateNowTimeout": "FreeLLMAPI har inte startat om efter 5 minuter. Kontrollera loggarna för watchtower-containern."
+    "updateNowTimeout": "PolarAI har inte startat om efter 5 minuter. Kontrollera loggarna för watchtower-containern."
   },
   "models": {
     "title": "Modeller",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Månatlig tokenbudget",
     "remaining": "Kvarvarande",
     "used": "Används",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "En nyare version av FreeLLMAPI är installerad.",
+    "newBuild": "En nyare version av PolarAI är installerad.",
     "reload": "Läs in igen"
   },
   "freeTier": {

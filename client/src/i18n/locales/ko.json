@@ -60,7 +60,7 @@
     "emailChanged": "이메일이 변경되었습니다.",
     "passwordReset": "비밀번호가 재설정되었습니다. 로그인해 주세요.",
     "resetCodeDockerHint": "Docker에서 실행 중인가요? 코드는 컨테이너 로그에 있습니다: docker logs <container>",
-    "desktopSessionFailed": "대시보드가 로컬 서버에 로그인하지 못했습니다. FreeLLMAPI를 종료한 뒤 다시 여세요."
+    "desktopSessionFailed": "대시보드가 로컬 서버에 로그인하지 못했습니다. PolarAI를 종료한 뒤 다시 여세요."
   },
   "common": {
     "save": "저장",
@@ -160,16 +160,16 @@
     "notGitInstall": "이 설치에는 커밋 정보가 포함되어 있지 않습니다.",
     "checkFailed": "업데이트를 확인할 수 없습니다.",
     "autoUpdateCheck": "자동 업데이트 확인",
-    "restartAfterUpdate": "빌드가 완료되면 FreeLLMAPI를 다시 시작하세요.",
+    "restartAfterUpdate": "빌드가 완료되면 PolarAI를 다시 시작하세요.",
     "downloadUpdate": "업데이트 다운로드",
     "downloadingUpdate": "다운로드 중… {percent}%",
     "restartToUpdate": "재시작하여 업데이트",
-    "updateReadyHint": "다운로드 완료. FreeLLMAPI가 데이터를 백업한 뒤 재시작하고 새 버전을 엽니다.",
+    "updateReadyHint": "다운로드 완료. PolarAI가 데이터를 백업한 뒤 재시작하고 새 버전을 엽니다.",
     "updateInstallFailed": "업데이트를 설치하지 못했습니다.",
     "updateNow": "지금 업데이트",
-    "updatingContainer": "새 이미지를 받아 재시작하는 중입니다. FreeLLMAPI가 돌아오면 이 페이지가 새로고침됩니다.",
+    "updatingContainer": "새 이미지를 받아 재시작하는 중입니다. PolarAI가 돌아오면 이 페이지가 새로고침됩니다.",
     "updateNowFailed": "업데이터가 요청을 받지 않았습니다. watchtower 컨테이너가 실행 중인지 확인하세요.",
-    "updateNowTimeout": "5분이 지나도 FreeLLMAPI가 재시작되지 않았습니다. watchtower 컨테이너 로그를 확인하세요."
+    "updateNowTimeout": "5분이 지나도 PolarAI가 재시작되지 않았습니다. watchtower 컨테이너 로그를 확인하세요."
   },
   "models": {
     "title": "모델",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "월간 토큰 예산",
     "remaining": "남은",
     "used": "사용됨",
-    "usedScopeHint": "이번 달(달력 기준) 시작 이후의 채팅 요청만, 활성 체인의 모든 모델(사용자 지정 엔드포인트 포함)에 대해 합산한 값입니다. FreeLLMAPI를 거치지 않고 제공자에 직접 보낸 트래픽은 포함되지 않습니다.",
+    "usedScopeHint": "이번 달(달력 기준) 시작 이후의 채팅 요청만, 활성 체인의 모든 모델(사용자 지정 엔드포인트 포함)에 대해 합산한 값입니다. PolarAI를 거치지 않고 제공자에 직접 보낸 트래픽은 포함되지 않습니다.",
     "legendRemainingTitle": "{name}({platform})의 남은 양 / 월 예산",
     "noPublishedQuota": "공개 할당량이 없는 모델 {count}개",
     "noPublishedQuotaTitle": "이 모델들은 공개된 월 토큰 예산이 없어 남은 양을 표시할 수 없습니다.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "더 새로운 버전의 FreeLLMAPI가 설치되었습니다.",
+    "newBuild": "더 새로운 버전의 PolarAI가 설치되었습니다.",
     "reload": "새로고침"
   },
   "freeTier": {

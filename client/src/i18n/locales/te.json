@@ -60,7 +60,7 @@
     "emailChanged": "ఇమెయిల్ విజయవంతంగా మార్చబడింది.",
     "passwordReset": "పాస్‌వర్డ్ రీసెట్ అయింది. దయచేసి సైన్ ఇన్ చేయండి.",
     "resetCodeDockerHint": "Docker లో నడుపుతున్నారా? కోడ్ కంటైనర్ లాగ్‌లో ఉంది: docker logs <container>.",
-    "desktopSessionFailed": "డాష్‌బోర్డ్ లోకల్ సర్వర్‌కు సైన్ ఇన్ కాలేకపోయింది. FreeLLMAPI ని మూసివేసి మళ్లీ తెరవండి."
+    "desktopSessionFailed": "డాష్‌బోర్డ్ లోకల్ సర్వర్‌కు సైన్ ఇన్ కాలేకపోయింది. PolarAI ని మూసివేసి మళ్లీ తెరవండి."
   },
   "common": {
     "save": "సేవ్ చేయండి",
@@ -160,16 +160,16 @@
     "notGitInstall": "ఈ ఇన్‌స్టాలేషన్‌లో commit సమాచారం లేదు.",
     "checkFailed": "నవీకరణల కోసం తనిఖీ చేయడం సాధ్యం కాలేదు.",
     "autoUpdateCheck": "స్వయంచాలక నవీకరణ తనిఖీ",
-    "restartAfterUpdate": "బిల్డ్ పూర్తయిన తర్వాత FreeLLMAPIని పునఃప్రారంభించండి.",
+    "restartAfterUpdate": "బిల్డ్ పూర్తయిన తర్వాత PolarAIని పునఃప్రారంభించండి.",
     "downloadUpdate": "అప్‌డేట్ డౌన్‌లోడ్ చేయండి",
     "downloadingUpdate": "డౌన్‌లోడ్ అవుతోంది… {percent}%",
     "restartToUpdate": "అప్‌డేట్ కోసం రీస్టార్ట్ చేయండి",
-    "updateReadyHint": "డౌన్‌లోడ్ అయింది. FreeLLMAPI మీ డేటాను బ్యాకప్ చేసి, రీస్టార్ట్ అయి కొత్త వెర్షన్‌ను తెరుస్తుంది.",
+    "updateReadyHint": "డౌన్‌లోడ్ అయింది. PolarAI మీ డేటాను బ్యాకప్ చేసి, రీస్టార్ట్ అయి కొత్త వెర్షన్‌ను తెరుస్తుంది.",
     "updateInstallFailed": "అప్‌డేట్‌ను ఇన్‌స్టాల్ చేయలేకపోయాము.",
     "updateNow": "ఇప్పుడే అప్‌డేట్ చేయండి",
-    "updatingContainer": "కొత్త ఇమేజ్‌ను తెచ్చి రీస్టార్ట్ అవుతోంది. FreeLLMAPI తిరిగి వచ్చాక ఈ పేజీ రీలోడ్ అవుతుంది.",
+    "updatingContainer": "కొత్త ఇమేజ్‌ను తెచ్చి రీస్టార్ట్ అవుతోంది. PolarAI తిరిగి వచ్చాక ఈ పేజీ రీలోడ్ అవుతుంది.",
     "updateNowFailed": "అప్‌డేటర్ అభ్యర్థనను అంగీకరించలేదు. watchtower కంటైనర్ నడుస్తోందో లేదో చూడండి.",
-    "updateNowTimeout": "5 నిమిషాల తర్వాత కూడా FreeLLMAPI రీస్టార్ట్ కాలేదు. watchtower కంటైనర్ లాగ్‌లను చూడండి."
+    "updateNowTimeout": "5 నిమిషాల తర్వాత కూడా PolarAI రీస్టార్ట్ కాలేదు. watchtower కంటైనర్ లాగ్‌లను చూడండి."
   },
   "models": {
     "title": "మోడల్స్",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "నెలవారీ టోకెన్ బడ్జెట్",
     "remaining": "మిగిలి ఉంది",
     "used": "ఉపయోగించారు",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "FreeLLMAPI యొక్క కొత్త వెర్షన్ ఇన్‌స్టాల్ అయింది.",
+    "newBuild": "PolarAI యొక్క కొత్త వెర్షన్ ఇన్‌స్టాల్ అయింది.",
     "reload": "రీలోడ్"
   },
   "freeTier": {

@@ -244,7 +244,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     <Centered>
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block size-2 rounded-full bg-foreground" />
-        <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+        <span className="font-semibold tracking-tight text-sm">PolarAI</span>
         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary ms-auto">
           Multi-Tenant
         </span>
@@ -510,11 +510,9 @@ function ForgotPasswordForm({
     return () => clearInterval(timer)
   }, [cooldown])
 
-  const emailError = !email.trim()
-    ? t('validation.required')
-    : !isEmail(email)
-      ? t('validation.email')
-      : null
+  const emailError = email.trim() && !isEmail(email)
+    ? t('validation.email')
+    : null
 
   const passwordError = !newPassword
     ? t('validation.required')
@@ -522,11 +520,9 @@ function ForgotPasswordForm({
       ? t('validation.passwordMin', { min: PASSWORD_MIN })
       : null
 
-  const confirmError = !confirmPassword
-    ? t('validation.required')
-    : confirmPassword !== newPassword
-      ? 'Passwords do not match'
-      : null
+  const confirmError = confirmPassword && confirmPassword !== newPassword
+    ? 'Passwords do not match'
+    : null
 
   const codeError = !resetCode.trim() ? t('validation.required') : null
 
@@ -541,7 +537,7 @@ function ForgotPasswordForm({
     try {
       await apiFetch<{ success: boolean; email?: string; message?: string }>('/api/auth/forgot-password', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify(email.trim() ? { email: email.trim() } : {}),
       })
       setStep('reset')
       setCooldown(30)
@@ -572,7 +568,7 @@ function ForgotPasswordForm({
       }>('/api/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({
-          email: email.trim(),
+          ...(email.trim() ? { email: email.trim() } : {}),
           resetCode: resetCode.trim(),
           newPassword,
         }),
@@ -608,7 +604,7 @@ function ForgotPasswordForm({
     <Centered>
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block size-2 rounded-full bg-foreground" />
-        <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+        <span className="font-semibold tracking-tight text-sm">PolarAI</span>
       </div>
       <div className="rounded-3xl border bg-card p-6 shadow-sm">
         <div className="flex items-center gap-2 mb-4">
@@ -658,7 +654,7 @@ function ForgotPasswordForm({
 
             <Button type="submit" className="w-full h-10" disabled={busy}>
               {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
-              {busy ? 'Sending Reset Code...' : 'Send Reset Code to Email'}
+              {busy ? t('auth.requestingResetCode') : t('auth.requestResetCode')}
             </Button>
           </form>
         )}

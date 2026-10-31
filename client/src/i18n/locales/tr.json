@@ -60,7 +60,7 @@
     "emailChanged": "E-posta değiştirildi.",
     "passwordReset": "Şifre sıfırlandı. Lütfen giriş yapın.",
     "resetCodeDockerHint": "Docker içinde mi çalışıyor? Kod konteyner günlüğündedir: docker logs <container>.",
-    "desktopSessionFailed": "Kontrol paneli yerel sunucuya giriş yapamadı. FreeLLMAPI uygulamasını kapatıp yeniden açın."
+    "desktopSessionFailed": "Kontrol paneli yerel sunucuya giriş yapamadı. PolarAI uygulamasını kapatıp yeniden açın."
   },
   "common": {
     "save": "Kaydet",
@@ -160,16 +160,16 @@
     "notGitInstall": "Bu kurulum commit bilgisi içermiyor.",
     "checkFailed": "Güncellemeler denetlenemedi.",
     "autoUpdateCheck": "Otomatik güncelleme denetimi",
-    "restartAfterUpdate": "Derleme tamamlandıktan sonra FreeLLMAPI'yi yeniden başlatın.",
+    "restartAfterUpdate": "Derleme tamamlandıktan sonra PolarAI'yi yeniden başlatın.",
     "downloadUpdate": "Güncellemeyi indir",
     "downloadingUpdate": "İndiriliyor… %{percent}",
     "restartToUpdate": "Güncellemek için yeniden başlat",
-    "updateReadyHint": "İndirildi. FreeLLMAPI verilerinizi yedekler, yeniden başlar ve yeni sürümü açar.",
+    "updateReadyHint": "İndirildi. PolarAI verilerinizi yedekler, yeniden başlar ve yeni sürümü açar.",
     "updateInstallFailed": "Güncelleme yüklenemedi.",
     "updateNow": "Şimdi güncelle",
-    "updatingContainer": "Yeni imaj çekiliyor ve yeniden başlatılıyor. FreeLLMAPI geri geldiğinde bu sayfa yenilenecek.",
+    "updatingContainer": "Yeni imaj çekiliyor ve yeniden başlatılıyor. PolarAI geri geldiğinde bu sayfa yenilenecek.",
     "updateNowFailed": "Güncelleyici isteği kabul etmedi. watchtower konteynerinin çalıştığından emin olun.",
-    "updateNowTimeout": "FreeLLMAPI 5 dakika sonra hâlâ yeniden başlamadı. watchtower konteynerinin günlüklerine bakın."
+    "updateNowTimeout": "PolarAI 5 dakika sonra hâlâ yeniden başlamadı. watchtower konteynerinin günlüklerine bakın."
   },
   "models": {
     "title": "Modeller",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Aylık token bütçesi",
     "remaining": "kalan",
     "used": "kullanılan",
-    "usedScopeHint": "Yalnızca bu takvim ayının başından bu yana yapılan sohbet istekleri; etkin zincirdeki tüm modeller (özel uç noktalar dâhil) toplanır. FreeLLMAPI dışından sağlayıcıya gönderdiğiniz trafik sayılmaz.",
+    "usedScopeHint": "Yalnızca bu takvim ayının başından bu yana yapılan sohbet istekleri; etkin zincirdeki tüm modeller (özel uç noktalar dâhil) toplanır. PolarAI dışından sağlayıcıya gönderdiğiniz trafik sayılmaz.",
     "legendRemainingTitle": "{name} ({platform}) için kalan / aylık bütçe",
     "noPublishedQuota": "+{count} yayımlanmış kotası olmayan",
     "noPublishedQuotaTitle": "Bu modellerin belgelenmiş aylık token bütçesi yok; bu nedenle gösterilecek bir kalan miktar bulunmuyor.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "Yeni sürüm mevcut",
     "dismiss": "Yoksay",
-    "newBuild": "FreeLLMAPI'nin daha yeni bir sürümü yüklü.",
+    "newBuild": "PolarAI'nin daha yeni bir sürümü yüklü.",
     "reload": "Yeniden yükle"
   },
   "freeTier": {

@@ -60,7 +60,7 @@
     "emailChanged": "மின்னஞ்சல் வெற்றிகரமாக மாற்றப்பட்டது.",
     "passwordReset": "கடவுச்சொல் மீட்டமைக்கப்பட்டது. உள்நுழையவும்.",
     "resetCodeDockerHint": "Docker-இல் இயக்குகிறீர்களா? குறியீடு கண்டெய்னர் பதிவில் உள்ளது: docker logs <container>.",
-    "desktopSessionFailed": "டாஷ்போர்டால் உள்ளூர் சேவையகத்தில் உள்நுழைய முடியவில்லை. FreeLLMAPI-ஐ மூடிவிட்டு மீண்டும் திறக்கவும்."
+    "desktopSessionFailed": "டாஷ்போர்டால் உள்ளூர் சேவையகத்தில் உள்நுழைய முடியவில்லை. PolarAI-ஐ மூடிவிட்டு மீண்டும் திறக்கவும்."
   },
   "common": {
     "save": "சேமிக்கவும்",
@@ -160,16 +160,16 @@
     "notGitInstall": "இந்த நிறுவலில் commit தகவல் இல்லை.",
     "checkFailed": "புதுப்பிப்புகளைச் சரிபார்க்க முடியவில்லை.",
     "autoUpdateCheck": "தானியங்கு புதுப்பிப்புச் சரிபார்ப்பு",
-    "restartAfterUpdate": "உருவாக்கம் முடிந்ததும் FreeLLMAPI-ஐ மறுதொடக்கம் செய்யவும்.",
+    "restartAfterUpdate": "உருவாக்கம் முடிந்ததும் PolarAI-ஐ மறுதொடக்கம் செய்யவும்.",
     "downloadUpdate": "புதுப்பிப்பைப் பதிவிறக்கு",
     "downloadingUpdate": "பதிவிறக்குகிறது… {percent}%",
     "restartToUpdate": "புதுப்பிக்க மறுதொடக்கம் செய்",
-    "updateReadyHint": "பதிவிறக்கப்பட்டது. FreeLLMAPI உங்கள் தரவைக் காப்புப்பிரதி எடுத்து, மறுதொடக்கம் செய்து புதிய பதிப்பைத் திறக்கும்.",
+    "updateReadyHint": "பதிவிறக்கப்பட்டது. PolarAI உங்கள் தரவைக் காப்புப்பிரதி எடுத்து, மறுதொடக்கம் செய்து புதிய பதிப்பைத் திறக்கும்.",
     "updateInstallFailed": "புதுப்பிப்பை நிறுவ முடியவில்லை.",
     "updateNow": "இப்போது புதுப்பி",
-    "updatingContainer": "புதிய image-ஐப் பெற்று மறுதொடக்கம் செய்கிறது. FreeLLMAPI திரும்பியதும் இந்தப் பக்கம் மீண்டும் ஏற்றப்படும்.",
+    "updatingContainer": "புதிய image-ஐப் பெற்று மறுதொடக்கம் செய்கிறது. PolarAI திரும்பியதும் இந்தப் பக்கம் மீண்டும் ஏற்றப்படும்.",
     "updateNowFailed": "புதுப்பிப்பான் கோரிக்கையை ஏற்கவில்லை. watchtower கொள்கலன் இயங்குகிறதா எனச் சரிபார்க்கவும்.",
-    "updateNowTimeout": "5 நிமிடங்களுக்குப் பிறகும் FreeLLMAPI மறுதொடக்கம் ஆகவில்லை. watchtower கொள்கலனின் பதிவுகளைப் பார்க்கவும்."
+    "updateNowTimeout": "5 நிமிடங்களுக்குப் பிறகும் PolarAI மறுதொடக்கம் ஆகவில்லை. watchtower கொள்கலனின் பதிவுகளைப் பார்க்கவும்."
   },
   "models": {
     "title": "மாதிரிகள்",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "மாதாந்திர டோக்கன் பட்ஜெட்",
     "remaining": "மீதமுள்ள",
     "used": "பயன்படுத்தப்பட்டது",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "FreeLLMAPI-இன் புதிய பதிப்பு நிறுவப்பட்டுள்ளது.",
+    "newBuild": "PolarAI-இன் புதிய பதிப்பு நிறுவப்பட்டுள்ளது.",
     "reload": "மீண்டும் ஏற்று"
   },
   "freeTier": {

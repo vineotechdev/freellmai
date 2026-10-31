@@ -60,7 +60,7 @@
     "emailChanged": "Email changed successfully.",
     "passwordReset": "Password reset successfully. Please sign in.",
     "resetCodeDockerHint": "Running in Docker? The code is in the container log: docker logs <container>.",
-    "desktopSessionFailed": "The dashboard could not sign in to the local server. Quit FreeLLMAPI and open it again."
+    "desktopSessionFailed": "The dashboard could not sign in to the local server. Quit PolarAI and open it again."
   },
   "common": {
     "save": "Save",
@@ -160,16 +160,16 @@
     "notGitInstall": "This installation does not include commit information.",
     "checkFailed": "Could not check for updates.",
     "autoUpdateCheck": "Automatic update check",
-    "restartAfterUpdate": "Restart FreeLLMAPI after the build completes.",
+    "restartAfterUpdate": "Restart PolarAI after the build completes.",
     "downloadUpdate": "Download update",
     "downloadingUpdate": "Downloading… {percent}%",
     "restartToUpdate": "Restart to update",
-    "updateReadyHint": "Downloaded. FreeLLMAPI backs up your data, restarts and opens the new version.",
+    "updateReadyHint": "Downloaded. PolarAI backs up your data, restarts and opens the new version.",
     "updateInstallFailed": "The update could not be installed.",
     "updateNow": "Update now",
-    "updatingContainer": "Pulling the new image and restarting. This page reloads when FreeLLMAPI is back.",
+    "updatingContainer": "Pulling the new image and restarting. This page reloads when PolarAI is back.",
     "updateNowFailed": "The updater did not accept the request. Check that the watchtower container is running.",
-    "updateNowTimeout": "FreeLLMAPI has not restarted after 5 minutes. Check the watchtower container's logs."
+    "updateNowTimeout": "PolarAI has not restarted after 5 minutes. Check the watchtower container's logs."
   },
   "models": {
     "title": "Models",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Monthly token budget",
     "remaining": "remaining",
     "used": "used",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "A newer version of FreeLLMAPI is installed.",
+    "newBuild": "A newer version of PolarAI is installed.",
     "reload": "Reload"
   },
   "freeTier": {

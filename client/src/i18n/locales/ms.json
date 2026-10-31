@@ -60,7 +60,7 @@
     "emailChanged": "E-mel berjaya ditukar.",
     "passwordReset": "Kata laluan telah ditetapkan semula. Sila log masuk.",
     "resetCodeDockerHint": "Berjalan dalam Docker? Kod berada dalam log kontena: docker logs <container>.",
-    "desktopSessionFailed": "Papan pemuka tidak dapat log masuk ke pelayan tempatan. Tutup FreeLLMAPI dan buka semula."
+    "desktopSessionFailed": "Papan pemuka tidak dapat log masuk ke pelayan tempatan. Tutup PolarAI dan buka semula."
   },
   "common": {
     "save": "Simpan",
@@ -160,16 +160,16 @@
     "notGitInstall": "Pemasangan ini tidak menyertakan maklumat komit.",
     "checkFailed": "Tidak dapat menyemak kemas kini.",
     "autoUpdateCheck": "Semakan kemas kini automatik",
-    "restartAfterUpdate": "Mulakan semula FreeLLMAPI selepas binaan selesai.",
+    "restartAfterUpdate": "Mulakan semula PolarAI selepas binaan selesai.",
     "downloadUpdate": "Muat turun kemas kini",
     "downloadingUpdate": "Memuat turun… {percent}%",
     "restartToUpdate": "Mulakan semula untuk mengemas kini",
-    "updateReadyHint": "Selesai dimuat turun. FreeLLMAPI menyandarkan data anda, bermula semula dan membuka versi baharu.",
+    "updateReadyHint": "Selesai dimuat turun. PolarAI menyandarkan data anda, bermula semula dan membuka versi baharu.",
     "updateInstallFailed": "Kemas kini tidak dapat dipasang.",
     "updateNow": "Kemas kini sekarang",
-    "updatingContainer": "Menarik imej baharu dan memulakan semula. Halaman ini dimuat semula apabila FreeLLMAPI kembali.",
+    "updatingContainer": "Menarik imej baharu dan memulakan semula. Halaman ini dimuat semula apabila PolarAI kembali.",
     "updateNowFailed": "Pengemas kini tidak menerima permintaan. Semak bahawa kontena watchtower sedang berjalan.",
-    "updateNowTimeout": "FreeLLMAPI belum bermula semula selepas 5 minit. Semak log kontena watchtower."
+    "updateNowTimeout": "PolarAI belum bermula semula selepas 5 minit. Semak log kontena watchtower."
   },
   "models": {
     "title": "Model",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "Bajet token bulanan",
     "remaining": "baki",
     "used": "digunakan",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "Versi FreeLLMAPI yang lebih baharu telah dipasang.",
+    "newBuild": "Versi PolarAI yang lebih baharu telah dipasang.",
     "reload": "Muat semula"
   },
   "freeTier": {

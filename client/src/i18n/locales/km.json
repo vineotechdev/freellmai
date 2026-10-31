@@ -60,7 +60,7 @@
     "emailChanged": "បានប្តូរអ៊ីមែលដោយជោគជ័យ។",
     "passwordReset": "បានកំណត់ពាក្យសម្ងាត់ឡើងវិញ។ សូមចូលគណនី។",
     "resetCodeDockerHint": "កំពុងដំណើរការក្នុង Docker មែនទេ? លេខកូដស្ថិតនៅក្នុងកំណត់ហេតុកុងតឺន័រ៖ docker logs <container>។",
-    "desktopSessionFailed": "ផ្ទាំងគ្រប់គ្រងមិនអាចចូលទៅម៉ាស៊ីនមេមូលដ្ឋានបានទេ។ សូមបិទ FreeLLMAPI ហើយបើកវាឡើងវិញ។"
+    "desktopSessionFailed": "ផ្ទាំងគ្រប់គ្រងមិនអាចចូលទៅម៉ាស៊ីនមេមូលដ្ឋានបានទេ។ សូមបិទ PolarAI ហើយបើកវាឡើងវិញ។"
   },
   "common": {
     "save": "រក្សាទុក",
@@ -160,16 +160,16 @@
     "notGitInstall": "ការដំឡើងនេះមិនមានព័ត៌មាន commit ទេ។",
     "checkFailed": "មិនអាចពិនិត្យរកការអាប់ដេតបានទេ។",
     "autoUpdateCheck": "ការពិនិត្យអាប់ដេតដោយស្វ័យប្រវត្តិ",
-    "restartAfterUpdate": "ចាប់ផ្តើម FreeLLMAPI ឡើងវិញ បន្ទាប់ពីការបង្កើតបានបញ្ចប់។",
+    "restartAfterUpdate": "ចាប់ផ្តើម PolarAI ឡើងវិញ បន្ទាប់ពីការបង្កើតបានបញ្ចប់។",
     "downloadUpdate": "ទាញយកបច្ចុប្បន្នភាព",
     "downloadingUpdate": "កំពុងទាញយក… {percent}%",
     "restartToUpdate": "ចាប់ផ្ដើមឡើងវិញដើម្បីធ្វើបច្ចុប្បន្នភាព",
-    "updateReadyHint": "បានទាញយករួច។ FreeLLMAPI បម្រុងទុកទិន្នន័យរបស់អ្នក ចាប់ផ្ដើមឡើងវិញ ហើយបើកកំណែថ្មី។",
+    "updateReadyHint": "បានទាញយករួច។ PolarAI បម្រុងទុកទិន្នន័យរបស់អ្នក ចាប់ផ្ដើមឡើងវិញ ហើយបើកកំណែថ្មី។",
     "updateInstallFailed": "មិនអាចដំឡើងបច្ចុប្បន្នភាពបានទេ។",
     "updateNow": "ធ្វើបច្ចុប្បន្នភាពឥឡូវនេះ",
-    "updatingContainer": "កំពុងទាញរូបភាពថ្មី ហើយចាប់ផ្ដើមឡើងវិញ។ ទំព័រនេះនឹងផ្ទុកឡើងវិញពេល FreeLLMAPI ត្រឡប់មកវិញ។",
+    "updatingContainer": "កំពុងទាញរូបភាពថ្មី ហើយចាប់ផ្ដើមឡើងវិញ។ ទំព័រនេះនឹងផ្ទុកឡើងវិញពេល PolarAI ត្រឡប់មកវិញ។",
     "updateNowFailed": "កម្មវិធីធ្វើបច្ចុប្បន្នភាពមិនបានទទួលសំណើទេ។ ពិនិត្យថា container watchtower កំពុងដំណើរការ។",
-    "updateNowTimeout": "FreeLLMAPI មិនទាន់ចាប់ផ្ដើមឡើងវិញក្រោយ ៥ នាទី។ ពិនិត្យកំណត់ហេតុរបស់ container watchtower។"
+    "updateNowTimeout": "PolarAI មិនទាន់ចាប់ផ្ដើមឡើងវិញក្រោយ ៥ នាទី។ ពិនិត្យកំណត់ហេតុរបស់ container watchtower។"
   },
   "models": {
     "title": "ម៉ូដែល",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "ថវិកាតូខិនប្រចាំខែ",
     "remaining": "នៅសល់",
     "used": "បានប្រើ",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "កំណែថ្មីជាងរបស់ FreeLLMAPI ត្រូវបានដំឡើង។",
+    "newBuild": "កំណែថ្មីជាងរបស់ PolarAI ត្រូវបានដំឡើង។",
     "reload": "ផ្ទុកឡើងវិញ"
   },
   "freeTier": {

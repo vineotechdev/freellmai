@@ -60,7 +60,7 @@
     "emailChanged": "ელფოსტა წარმატებით შეიცვალა.",
     "passwordReset": "პაროლი აღდგა. გთხოვთ, შედით.",
     "resetCodeDockerHint": "Docker-ში მუშაობთ? კოდი კონტეინერის ჟურნალშია: docker logs <container>.",
-    "desktopSessionFailed": "პანელმა ლოკალურ სერვერზე შესვლა ვერ შეძლო. დახურეთ FreeLLMAPI და ხელახლა გახსენით."
+    "desktopSessionFailed": "პანელმა ლოკალურ სერვერზე შესვლა ვერ შეძლო. დახურეთ PolarAI და ხელახლა გახსენით."
   },
   "common": {
     "save": "შენახვა",
@@ -160,16 +160,16 @@
     "notGitInstall": "ეს ინსტალაცია კომიტების შესახებ ინფორმაციას არ შეიცავს.",
     "checkFailed": "განახლებების შემოწმება ვერ მოხერხდა.",
     "autoUpdateCheck": "განახლებების ავტომატური შემოწმება",
-    "restartAfterUpdate": "ბილდის დასრულების შემდეგ გადატვირთეთ FreeLLMAPI.",
+    "restartAfterUpdate": "ბილდის დასრულების შემდეგ გადატვირთეთ PolarAI.",
     "downloadUpdate": "განახლების ჩამოტვირთვა",
     "downloadingUpdate": "იტვირთება… {percent}%",
     "restartToUpdate": "გადატვირთვა განახლებისთვის",
-    "updateReadyHint": "ჩამოიტვირთა. FreeLLMAPI ქმნის თქვენი მონაცემების სარეზერვო ასლს, გადაიტვირთება და გახსნის ახალ ვერსიას.",
+    "updateReadyHint": "ჩამოიტვირთა. PolarAI ქმნის თქვენი მონაცემების სარეზერვო ასლს, გადაიტვირთება და გახსნის ახალ ვერსიას.",
     "updateInstallFailed": "განახლების დაყენება ვერ მოხერხდა.",
     "updateNow": "ახლავე განახლება",
-    "updatingContainer": "ახალი იმიჯის ჩამოტვირთვა და გადატვირთვა. გვერდი გადაიტვირთება, როცა FreeLLMAPI დაბრუნდება.",
+    "updatingContainer": "ახალი იმიჯის ჩამოტვირთვა და გადატვირთვა. გვერდი გადაიტვირთება, როცა PolarAI დაბრუნდება.",
     "updateNowFailed": "განახლების სერვისმა მოთხოვნა არ მიიღო. შეამოწმეთ, მუშაობს თუ არა watchtower კონტეინერი.",
-    "updateNowTimeout": "FreeLLMAPI 5 წუთის შემდეგაც არ გადაიტვირთა. შეამოწმეთ watchtower კონტეინერის ჟურნალები."
+    "updateNowTimeout": "PolarAI 5 წუთის შემდეგაც არ გადაიტვირთა. შეამოწმეთ watchtower კონტეინერის ჟურნალები."
   },
   "models": {
     "title": "მოდელები",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "ყოველთვიური სიმბოლური ბიუჯეტი",
     "remaining": "დარჩენილი",
     "used": "გამოყენებულია",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "დაყენებულია FreeLLMAPI-ის უფრო ახალი ვერსია.",
+    "newBuild": "დაყენებულია PolarAI-ის უფრო ახალი ვერსია.",
     "reload": "გადატვირთვა"
   },
   "freeTier": {

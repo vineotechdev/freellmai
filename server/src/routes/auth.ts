@@ -358,7 +358,7 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
     res.status(403).json({
       error: {
         message: 'A setup code is required to create the first account from a remote device. ' +
-          'Check the server logs for the code, or open the dashboard from a browser on the machine running FreeLLMAPI.',
+          'Check the server logs for the code, or open the dashboard from a browser on the machine running PolarAI.',
         type: 'setup_code_required',
       },
     });

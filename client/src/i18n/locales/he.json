@@ -60,7 +60,7 @@
     "emailChanged": "הדוא\"ל שונה בהצלחה.",
     "passwordReset": "הסיסמה אופסה. יש להתחבר.",
     "resetCodeDockerHint": "מריצים ב-Docker? הקוד מופיע ביומן הקונטיינר: docker logs <container>.",
-    "desktopSessionFailed": "לוח הבקרה לא הצליח להתחבר לשרת המקומי. סגור את FreeLLMAPI ופתח אותו מחדש."
+    "desktopSessionFailed": "לוח הבקרה לא הצליח להתחבר לשרת המקומי. סגור את PolarAI ופתח אותו מחדש."
   },
   "common": {
     "save": "שמור",
@@ -160,16 +160,16 @@
     "notGitInstall": "התקנה זו אינה כוללת מידע על קומיטים.",
     "checkFailed": "לא ניתן היה לבדוק אם קיימים עדכונים.",
     "autoUpdateCheck": "בדיקת עדכונים אוטומטית",
-    "restartAfterUpdate": "הפעל מחדש את FreeLLMAPI לאחר השלמת הבנייה.",
+    "restartAfterUpdate": "הפעל מחדש את PolarAI לאחר השלמת הבנייה.",
     "downloadUpdate": "הורדת העדכון",
     "downloadingUpdate": "מוריד… {percent}%",
     "restartToUpdate": "הפעלה מחדש לעדכון",
-    "updateReadyHint": "ההורדה הושלמה. FreeLLMAPI מגבה את הנתונים שלך, מופעל מחדש ופותח את הגרסה החדשה.",
+    "updateReadyHint": "ההורדה הושלמה. PolarAI מגבה את הנתונים שלך, מופעל מחדש ופותח את הגרסה החדשה.",
     "updateInstallFailed": "לא ניתן היה להתקין את העדכון.",
     "updateNow": "עדכן עכשיו",
-    "updatingContainer": "מושך את האימג׳ החדש ומפעיל מחדש. הדף ייטען מחדש כש-FreeLLMAPI יחזור.",
+    "updatingContainer": "מושך את האימג׳ החדש ומפעיל מחדש. הדף ייטען מחדש כש-PolarAI יחזור.",
     "updateNowFailed": "המעדכן לא קיבל את הבקשה. ודאו שמכולת watchtower פועלת.",
-    "updateNowTimeout": "FreeLLMAPI לא הופעל מחדש אחרי 5 דקות. בדקו את היומנים של מכולת watchtower."
+    "updateNowTimeout": "PolarAI לא הופעל מחדש אחרי 5 דקות. בדקו את היומנים של מכולת watchtower."
   },
   "models": {
     "title": "דגמים",
@@ -192,7 +192,7 @@
     "monthlyTokenBudget": "תקציב טוקנים חודשי",
     "remaining": "נותרו",
     "used": "משומש",
-    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside FreeLLMAPI is not counted.",
+    "usedScopeHint": "Chat requests only, since the start of this calendar month, summed over every model in the active chain — custom endpoints included. Traffic you send to a provider outside PolarAI is not counted.",
     "legendRemainingTitle": "Remaining / monthly budget for {name} ({platform})",
     "noPublishedQuota": "+{count} with no published quota",
     "noPublishedQuotaTitle": "These models have no documented monthly token budget, so there is no remaining figure to show.",
@@ -1199,7 +1199,7 @@
   "update": {
     "available": "New version available",
     "dismiss": "Dismiss",
-    "newBuild": "הותקנה גרסה חדשה יותר של FreeLLMAPI.",
+    "newBuild": "הותקנה גרסה חדשה יותר של PolarAI.",
     "reload": "טעינה מחדש"
   },
   "freeTier": {
