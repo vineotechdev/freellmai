@@ -38,8 +38,8 @@ export function hashClientProfileKey(key: string): string {
 }
 
 export type ResolvedAuth =
-  | { kind: 'unified'; systemPrompt: null; motherId: string; companyName?: string }
-  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null; motherId: string };
+  | { kind: 'unified'; systemPrompt: null; motherId: string; companyName?: string; userId?: number; apiKey?: string }
+  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null; motherId: string; userId?: number; apiKey?: string };
 
 interface ProfileRow {
   id: number;
@@ -62,9 +62,22 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   // 1. Tenant unified API key or JWT token
   const tenant = resolveTenantFromApiKey(trimmed);
   if (tenant) {
-    const res: ResolvedAuth = { kind: 'unified', systemPrompt: null, motherId: tenant.motherId, companyName: tenant.companyName };
+    const res: ResolvedAuth = {
+      kind: 'unified',
+      systemPrompt: null,
+      motherId: tenant.motherId,
+      companyName: tenant.companyName,
+      userId: tenant.userId,
+      apiKey: tenant.apiKey,
+    };
     Object.defineProperty(res, 'motherId', { value: tenant.motherId, enumerable: false, writable: true, configurable: true });
     Object.defineProperty(res, 'companyName', { value: tenant.companyName, enumerable: false, writable: true, configurable: true });
+    if (tenant.userId != null) {
+      Object.defineProperty(res, 'userId', { value: tenant.userId, enumerable: false, writable: true, configurable: true });
+    }
+    if (tenant.apiKey != null) {
+      Object.defineProperty(res, 'apiKey', { value: tenant.apiKey, enumerable: false, writable: true, configurable: true });
+    }
     return res;
   }
 

@@ -221,6 +221,8 @@ async function handleGenerate(req: Request, res: Response, stream: boolean): Pro
     reasoningEffort: effortFromGeminiThinking(generation),
     sessionId,
     endpoint: stream ? 'gemini/streamGenerateContent' : 'gemini/generateContent',
+    motherId: auth.motherId,
+    userId: auth.userId,
   }, streamWire(String(req.query.alt ?? '').toLowerCase() === 'sse'));
 }
 

@@ -76,11 +76,15 @@ export async function initPostgresSchema(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS tenant_api_keys (
         id SERIAL PRIMARY KEY,
-        mother_id TEXT NOT NULL UNIQUE,
+        user_id INTEGER,
+        mother_id TEXT NOT NULL,
         api_key TEXT NOT NULL UNIQUE,
         company_name TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE tenant_api_keys ADD COLUMN IF NOT EXISTS user_id INTEGER;
+      ALTER TABLE tenant_api_keys DROP CONSTRAINT IF EXISTS tenant_api_keys_mother_id_key;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_api_keys_user_id ON tenant_api_keys(user_id) WHERE user_id IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS api_keys (
         id SERIAL PRIMARY KEY,
@@ -92,9 +96,12 @@ export async function initPostgresSchema(): Promise<void> {
         status TEXT NOT NULL DEFAULT 'unknown',
         enabled INTEGER NOT NULL DEFAULT 1,
         mother_id TEXT,
+        user_id INTEGER,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         last_checked_at TIMESTAMPTZ
       );
+      ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id INTEGER;
+      CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
 
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -199,28 +206,29 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
     }
 
     // 3. Sync tenant_api_keys from PostgreSQL
-    const tenantRes = await p.query('SELECT mother_id, api_key, company_name, created_at FROM tenant_api_keys');
+    const tenantRes = await p.query('SELECT user_id, mother_id, api_key, company_name, created_at FROM tenant_api_keys');
     for (const row of tenantRes.rows) {
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       db.prepare(`
-        INSERT INTO tenant_api_keys (mother_id, api_key, company_name, created_at)
-        VALUES (?, ?, ?, COALESCE(?, datetime('now')))
-        ON CONFLICT(mother_id) DO UPDATE SET
-          api_key = excluded.api_key,
+        INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name, created_at)
+        VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
+        ON CONFLICT(api_key) DO UPDATE SET
+          user_id = excluded.user_id,
+          mother_id = excluded.mother_id,
           company_name = excluded.company_name
-      `).run(row.mother_id, row.api_key, row.company_name || 'Default Company', createdAtStr);
+      `).run(row.user_id ? Number(row.user_id) : null, row.mother_id, row.api_key, row.company_name || 'Default Company', createdAtStr);
     }
 
     // 4. Sync api_keys from PostgreSQL
-    const keysRes = await p.query('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, created_at FROM api_keys');
+    const keysRes = await p.query('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, created_at FROM api_keys');
     for (const row of keysRes.rows) {
       const existing = db.prepare('SELECT id FROM api_keys WHERE platform = ? AND encrypted_key = ?').get(row.platform, row.encrypted_key);
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       if (!existing) {
         db.prepare(`
-          INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', createdAtStr);
+          INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, createdAtStr);
       }
     }
 
@@ -262,33 +270,34 @@ export async function syncAllTablesToPostgres(db: Db): Promise<void> {
     }
 
     // 3. Sync tenant_api_keys
-    const tenantKeys = db.prepare('SELECT mother_id, api_key, company_name FROM tenant_api_keys').all() as any[];
+    const tenantKeys = db.prepare('SELECT user_id, mother_id, api_key, company_name FROM tenant_api_keys').all() as any[];
     for (const tk of tenantKeys) {
       await p.query(
-        `INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (mother_id) DO UPDATE SET
-           api_key = EXCLUDED.api_key,
+        `INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (api_key) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           mother_id = EXCLUDED.mother_id,
            company_name = EXCLUDED.company_name`,
-        [tk.mother_id, tk.api_key, tk.company_name || '']
+        [tk.user_id ? Number(tk.user_id) : null, tk.mother_id, tk.api_key, tk.company_name || '']
       );
     }
 
     // 4. Sync api_keys
-    const apiKeys = db.prepare('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id FROM api_keys').all() as any[];
+    const apiKeys = db.prepare('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id FROM api_keys').all() as any[];
     for (const k of apiKeys) {
       const exists = await p.query('SELECT id FROM api_keys WHERE platform = $1 AND encrypted_key = $2', [k.platform, k.encrypted_key]);
       if (exists.rows.length === 0) {
         await p.query(
-          `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, k.mother_id || null]
+          `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null]
         );
       } else {
         await p.query(
-          `UPDATE api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4
-           WHERE platform = $5 AND encrypted_key = $6`,
-          [k.label, k.status, k.enabled, k.mother_id || null, k.platform, k.encrypted_key]
+          `UPDATE api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4, user_id = $5
+           WHERE platform = $6 AND encrypted_key = $7`,
+          [k.label, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null, k.platform, k.encrypted_key]
         );
       }
     }
@@ -349,18 +358,19 @@ export async function persistUserToPostgres(user: { email: string; password_hash
 /**
  * Persists a tenant API key to PostgreSQL immediately.
  */
-export async function persistTenantKeyToPostgres(item: { mother_id: string; api_key: string; company_name?: string }): Promise<void> {
+export async function persistTenantKeyToPostgres(item: { user_id?: number | null; mother_id: string; api_key: string; company_name?: string }): Promise<void> {
   const p = getPostgresPool();
   if (!p || !isInitialized) return;
 
   try {
     await p.query(
-      `INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (mother_id) DO UPDATE SET
-         api_key = EXCLUDED.api_key,
+      `INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (api_key) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         mother_id = EXCLUDED.mother_id,
          company_name = EXCLUDED.company_name`,
-      [item.mother_id, item.api_key, item.company_name || '']
+      [item.user_id ? Number(item.user_id) : null, item.mother_id, item.api_key, item.company_name || '']
     );
   } catch (err: any) {
     console.error('[PostgreSQL] Failed to persist tenant key:', err.message);
@@ -370,7 +380,7 @@ export async function persistTenantKeyToPostgres(item: { mother_id: string; api_
 /**
  * Persists an API key to PostgreSQL immediately.
  */
-export async function persistApiKeyToPostgres(key: { platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; mother_id?: string }): Promise<void> {
+export async function persistApiKeyToPostgres(key: { platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; mother_id?: string; user_id?: number | null }): Promise<void> {
   const p = getPostgresPool();
   if (!p || !isInitialized) return;
 
@@ -378,15 +388,15 @@ export async function persistApiKeyToPostgres(key: { platform: string; label: st
     const exists = await p.query('SELECT id FROM api_keys WHERE platform = $1 AND encrypted_key = $2', [key.platform, key.encrypted_key]);
     if (exists.rows.length === 0) {
       await p.query(
-        `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, key.mother_id || null]
+        `INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, key.mother_id || null, key.user_id ? Number(key.user_id) : null]
       );
     } else {
       await p.query(
-        `UPDATE api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4
-         WHERE platform = $5 AND encrypted_key = $6`,
-        [key.label, key.status, key.enabled, key.mother_id || null, key.platform, key.encrypted_key]
+        `UPDATE api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4, user_id = $5
+         WHERE platform = $6 AND encrypted_key = $7`,
+        [key.label, key.status, key.enabled, key.mother_id || null, key.user_id ? Number(key.user_id) : null, key.platform, key.encrypted_key]
       );
     }
   } catch (err: any) {

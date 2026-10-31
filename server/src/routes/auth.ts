@@ -16,7 +16,7 @@ import {
   normalizeEmail,
   desktopSessionToken,
 } from '../services/auth.js';
-import { signJwtToken, getTenantApiKey, validatePolarQrCode } from '../services/tenant.js';
+import { signJwtToken, validatePolarQrCode } from '../services/tenant.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import {
   generateResetCode,
@@ -198,14 +198,12 @@ export function desktopSignInAllowed(req: Request): boolean {
 // sign-in form.
 authRouter.get('/status', (req: Request, res: Response) => {
   const session = validateSession(bearer(req));
-  const apiKey = session ? getTenantApiKey(session.motherId, session.companyName) : null;
   res.json({
     needsSetup: userCount() === 0,
     authenticated: !!session,
     email: session?.email ?? null,
     motherId: session?.motherId ?? null,
     companyName: session?.companyName ?? null,
-    apiKey,
     desktop: desktopSignInAllowed(req),
   });
 });
@@ -285,13 +283,11 @@ authRouter.post('/register', async (req: Request, res: Response) => {
       motherId: user.motherId,
       companyName: user.companyName,
     });
-    const apiKey = getTenantApiKey(user.motherId, user.companyName);
     res.status(201).json({
       token,
       email: user.email,
       motherId: user.motherId,
       companyName: user.companyName,
-      apiKey,
     });
   } catch (err: any) {
     res.status(400).json({ error: { message: err.message || 'Registration failed' } });
@@ -332,7 +328,6 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
             motherId: user.motherId,
             companyName: user.companyName,
           });
-          const apiKey = getTenantApiKey(user.motherId, user.companyName);
           res.status(201).json({
             token: jwtToken,
             jwtToken,
@@ -340,7 +335,6 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
             email: user.email,
             motherId: user.motherId,
             companyName: user.companyName,
-            apiKey,
           });
           return;
         } catch (err: any) {
@@ -384,7 +378,6 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
     motherId: user.motherId,
     companyName: user.companyName,
   });
-  const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.status(201).json({
     token: jwtToken,
     jwtToken,
@@ -392,7 +385,6 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
-    apiKey,
   });
 });
 
@@ -425,7 +417,6 @@ authRouter.post('/login', (req: Request, res: Response) => {
     motherId: user.motherId,
     companyName: user.companyName,
   });
-  const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.json({
     token: jwtToken,
     jwtToken,
@@ -433,7 +424,6 @@ authRouter.post('/login', (req: Request, res: Response) => {
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
-    apiKey,
   });
 });
 
@@ -448,13 +438,11 @@ authRouter.get('/me', (req: Request, res: Response) => {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
   }
-  const apiKey = getTenantApiKey(session.motherId, session.companyName);
   res.json({
     userId: session.userId,
     email: session.email,
     motherId: session.motherId,
     companyName: session.companyName,
-    apiKey,
   });
 });
 
@@ -633,13 +621,10 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
       motherId: user.motherId,
       companyName: user.companyName,
     });
-    const tenantApiKey = getTenantApiKey(user.motherId, user.companyName);
-
     res.json({
       success: true,
       token,
       jwtToken,
-      apiKey: tenantApiKey,
       email: user.email,
       motherId: user.motherId,
       companyName: user.companyName,

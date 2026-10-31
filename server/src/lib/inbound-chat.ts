@@ -65,6 +65,8 @@ export interface InboundChatRequest {
   reasoningEffort?: CompletionOptions['reasoning_effort'];
   sessionId?: string;
   endpoint: string;
+  motherId?: string;
+  userId?: number;
 }
 
 export interface InboundChatResult {
@@ -248,6 +250,9 @@ export async function runInboundChat(
         input.responseFormat !== undefined,
         state.skipPlatforms.size ? state.skipPlatforms : undefined,
         outputReserve,
+        undefined,
+        input.motherId,
+        input.userId,
       );
     },
     dispatch: async (route, attempt) => {

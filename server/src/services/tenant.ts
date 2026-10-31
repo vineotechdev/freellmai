@@ -103,11 +103,132 @@ export function getJwtSecret(): string {
   } catch {
     // ignore
   }
-  return 'polarlist_freellmapi_jwt_secret_token_secure_key_2026';
+  return 'a8f3c9d2b7e14f6a9c3e5d8f1a2b4c6d7e9f0a1b3c5d7e8f9a0b2c4d6e8f1a3';
 }
 
-export function signJwtToken(payload: { userId: number; email: string; motherId: string; companyName: string }): string {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: '30d' });
+export function signJwtToken(payload: {
+  userId: number;
+  email: string;
+  motherId: string;
+  companyName: string;
+  roles?: string;
+  designation?: string;
+}): string {
+  const normMotherId = normalizeMotherId(payload.motherId);
+  const normalizedEmail = payload.email.trim().toLowerCase();
+  const motherIdVal = isNaN(Number(normMotherId)) ? normMotherId : Number(normMotherId);
+
+  // Exact claim structure matching PolarList backend JwtTokenProvider.java
+  const claims: Record<string, any> = {
+    sub: String(payload.userId),
+    userId: payload.userId,
+    mother_id: motherIdVal,
+    motherId: normMotherId,
+    email: normalizedEmail,
+    companyName: payload.companyName || 'Default Company',
+    company_name: payload.companyName || 'Default Company',
+    type: 'access',
+    tv: 0,
+    base_url: 'https://polardata.polarlist.in',
+    roles: payload.roles || 'ROLE_USER,ROLE_ADMIN',
+  };
+  if (payload.designation) {
+    claims.designation = payload.designation;
+  }
+
+  return jwt.sign(claims, getJwtSecret(), { expiresIn: '30d' });
+}
+
+export interface ResolvedTenant {
+  motherId: string;
+  companyName: string;
+  userId?: number;
+  apiKey?: string;
+}
+
+/**
+ * Retrieves or generates a user-specific unified API key.
+ * Format: polar_<safeMotherId>_u<userId>_<randomHex>
+ */
+export function getUserApiKey(userId: number, motherId: string = 'default', companyName: string = 'Default Company'): string {
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+
+  const existing = db.prepare('SELECT api_key FROM tenant_api_keys WHERE user_id = ?').get(userId) as { api_key: string } | undefined;
+  if (existing?.api_key) {
+    if (existing.api_key.startsWith('flm_')) {
+      const migratedKey = existing.api_key.replace(/^flm_/, 'polar_');
+      try {
+        db.prepare('UPDATE tenant_api_keys SET api_key = ? WHERE user_id = ?').run(migratedKey, userId);
+        void persistTenantKeyToPostgres({ user_id: userId, mother_id: normId, api_key: migratedKey, company_name: companyName.trim() });
+      } catch (err: any) {
+        console.error('[Tenant] Failed to migrate flm_ key to polar_:', err.message);
+      }
+      return migratedKey;
+    }
+    return existing.api_key;
+  }
+
+  const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  const generatedKey = `polar_${safePrefix}_u${userId}_${crypto.randomBytes(20).toString('hex')}`;
+
+  try {
+    db.prepare(`
+      INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(api_key) DO NOTHING
+    `).run(userId, normId, generatedKey, companyName.trim());
+  } catch {
+    // If tenant_api_keys still has old schema without user_id column
+    try {
+      db.prepare(`
+        INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key
+      `).run(normId, generatedKey, companyName.trim());
+    } catch {}
+  }
+
+  void persistTenantKeyToPostgres({ user_id: userId, mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
+
+  return generatedKey;
+}
+
+/**
+ * Regenerates a user-specific unified API key.
+ */
+export function regenerateUserApiKey(userId: number, motherId: string = 'default', companyName: string = 'Default Company'): string {
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+
+  const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  const generatedKey = `polar_${safePrefix}_u${userId}_${crypto.randomBytes(20).toString('hex')}`;
+
+  try {
+    const existing = db.prepare('SELECT id FROM tenant_api_keys WHERE user_id = ?').get(userId);
+    if (existing) {
+      db.prepare('UPDATE tenant_api_keys SET api_key = ?, mother_id = ?, company_name = ? WHERE user_id = ?')
+        .run(generatedKey, normId, companyName.trim(), userId);
+    } else {
+      db.prepare(`
+        INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name)
+        VALUES (?, ?, ?, ?)
+      `).run(userId, normId, generatedKey, companyName.trim());
+    }
+  } catch {
+    // Legacy fallback
+    try {
+      db.prepare(`
+        INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key, company_name = excluded.company_name
+      `).run(normId, generatedKey, companyName.trim());
+    } catch {}
+  }
+
+  void persistTenantKeyToPostgres({ user_id: userId, mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
+
+  return generatedKey;
 }
 
 export function getTenantApiKey(motherId: string, companyName: string = 'Default Company'): string {
@@ -133,11 +254,20 @@ export function getTenantApiKey(motherId: string, companyName: string = 'Default
   const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   const generatedKey = `polar_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
 
-  db.prepare(`
-    INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
-    VALUES (?, ?, ?)
-    ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key
-  `).run(normId, generatedKey, companyName.trim());
+  try {
+    db.prepare(`
+      INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
+      VALUES (?, ?, ?)
+      ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key
+    `).run(normId, generatedKey, companyName.trim());
+  } catch {
+    try {
+      db.prepare(`
+        INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
+        VALUES (?, ?, ?)
+      `).run(normId, generatedKey, companyName.trim());
+    } catch {}
+  }
 
   void persistTenantKeyToPostgres({ mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
 
@@ -151,34 +281,97 @@ export function regenerateTenantApiKey(motherId: string, companyName: string = '
   const safePrefix = normId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   const generatedKey = `polar_${safePrefix}_${crypto.randomBytes(20).toString('hex')}`;
 
-  db.prepare(`
-    INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
-    VALUES (?, ?, ?)
-    ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key, company_name = excluded.company_name
-  `).run(normId, generatedKey, companyName.trim());
+  try {
+    db.prepare(`
+      INSERT INTO tenant_api_keys (mother_id, api_key, company_name)
+      VALUES (?, ?, ?)
+      ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key, company_name = excluded.company_name
+    `).run(normId, generatedKey, companyName.trim());
+  } catch {
+    try {
+      db.prepare(`
+        UPDATE tenant_api_keys SET api_key = ?, company_name = ? WHERE mother_id = ?
+      `).run(generatedKey, companyName.trim(), normId);
+    } catch {}
+  }
 
   void persistTenantKeyToPostgres({ mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
 
   return generatedKey;
 }
 
-export function resolveTenantFromApiKey(token: string | undefined): { motherId: string; companyName: string } | null {
+export function resolveTenantFromApiKey(token: string | undefined): ResolvedTenant | null {
   if (!token) return null;
   const trimmed = token.trim();
+  const db = getDb();
 
-  // 1. JWT Token Check
+  // 1. JWT Token Check: extract user details, auto-lookup user by email, and extract user unified key
   if (trimmed.split('.').length === 3) {
     try {
       const decoded = jwt.verify(trimmed, getJwtSecret()) as {
-        userId: number;
-        email: string;
+        sub?: string;
+        userId?: number;
+        email?: string;
+        mother_id?: number | string;
         motherId?: string;
         companyName?: string;
+        company_name?: string;
       };
-      if (decoded && (decoded.motherId || decoded.userId)) {
+      if (decoded && (decoded.email || decoded.mother_id || decoded.motherId || decoded.sub || decoded.userId)) {
+        let user: { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+        const normEmail = decoded.email ? decoded.email.trim().toLowerCase() : null;
+
+        if (normEmail) {
+          try {
+            user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?')
+              .get(normEmail) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+          } catch {}
+
+          // Auto-provision user record if token originated from PolarList backend
+          if (!user) {
+            const rawMotherId = decoded.mother_id || decoded.motherId || 'default';
+            const motherId = normalizeMotherId(String(rawMotherId));
+            const companyName = (decoded.companyName || decoded.company_name || 'PolarList User').trim();
+            let parsedUserId = decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId ? Number(decoded.userId) : null);
+            try {
+              if (parsedUserId && !isNaN(parsedUserId)) {
+                db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)').run(
+                  parsedUserId,
+                  motherId,
+                  companyName,
+                  normEmail,
+                  'external_jwt_auth'
+                );
+              } else {
+                const res = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)').run(
+                  motherId,
+                  companyName,
+                  normEmail,
+                  'external_jwt_auth'
+                );
+                parsedUserId = Number(res.lastInsertRowid);
+              }
+              user = { id: parsedUserId, email: normEmail, mother_id: motherId, company_name: companyName };
+            } catch {
+              user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(normEmail) as any;
+            }
+          }
+        }
+
+        const effectiveUserId = user ? user.id : (decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId ? Number(decoded.userId) : undefined));
+        const effectiveMotherId = normalizeMotherId(String((user && user.mother_id) || decoded.mother_id || decoded.motherId || 'default'));
+        const effectiveCompanyName = (user && user.company_name) || decoded.companyName || decoded.company_name || 'Default Company';
+
+        // Extract the user's unified key from email / user record
+        const apiKey = effectiveUserId
+          ? getUserApiKey(effectiveUserId, effectiveMotherId, effectiveCompanyName)
+          : getTenantApiKey(effectiveMotherId, effectiveCompanyName);
+
         return {
-          motherId: decoded.motherId ? normalizeMotherId(decoded.motherId) : 'default',
-          companyName: decoded.companyName || 'Default Company',
+          motherId: effectiveMotherId,
+          companyName: effectiveCompanyName,
+          userId: effectiveUserId,
+          apiKey,
         };
       }
     } catch {
@@ -186,36 +379,59 @@ export function resolveTenantFromApiKey(token: string | undefined): { motherId: 
     }
   }
 
-  const db = getDb();
-
   // 2. Exact match in tenant_api_keys
   try {
-    const row = db.prepare('SELECT mother_id, company_name FROM tenant_api_keys WHERE api_key = ?')
-      .get(trimmed) as { mother_id: string; company_name: string } | undefined;
+    const row = db.prepare('SELECT user_id, mother_id, company_name FROM tenant_api_keys WHERE api_key = ?')
+      .get(trimmed) as { user_id?: number | null; mother_id: string; company_name: string } | undefined;
     if (row) {
       return {
         motherId: normalizeMotherId(row.mother_id),
         companyName: row.company_name || 'Default Company',
+        userId: row.user_id != null ? Number(row.user_id) : undefined,
+        apiKey: trimmed,
       };
     }
   } catch {}
 
-  // 3. Prefix polar_<motherid>_<secret> or legacy flm_<motherid>_<secret> match
+  // 3. User-specific prefix: polar_<motherid>_u<userId>_<secret> or legacy flm_<motherid>_u<userId>_<secret>
   if (trimmed.startsWith('polar_') || trimmed.startsWith('flm_')) {
+    const userMatch = trimmed.match(/^(?:polar|flm)_([a-zA-Z0-9_-]+)_u(\d+)_[a-f0-9]+$/);
+    if (userMatch) {
+      const candidateMotherId = normalizeMotherId(userMatch[1]);
+      const candidateUserId = parseInt(userMatch[2], 10);
+      try {
+        const row = db.prepare('SELECT user_id, mother_id, company_name FROM tenant_api_keys WHERE user_id = ?')
+          .get(candidateUserId) as { user_id?: number | null; mother_id: string; company_name: string } | undefined;
+        if (row) {
+          return {
+            motherId: normalizeMotherId(row.mother_id),
+            companyName: row.company_name || candidateMotherId,
+            userId: candidateUserId,
+          };
+        }
+      } catch {}
+      return {
+        motherId: candidateMotherId,
+        companyName: candidateMotherId,
+        userId: candidateUserId,
+      };
+    }
+
+    // Legacy tenant prefix match: polar_<motherid>_<secret>
     const match = trimmed.match(/^(?:polar|flm)_([a-zA-Z0-9_-]+)_[a-f0-9]+$/);
     if (match) {
       const candidateMotherId = normalizeMotherId(match[1]);
       try {
-        const row = db.prepare('SELECT mother_id, company_name FROM tenant_api_keys WHERE mother_id = ?')
-          .get(candidateMotherId) as { mother_id: string; company_name: string } | undefined;
+        const row = db.prepare('SELECT user_id, mother_id, company_name FROM tenant_api_keys WHERE mother_id = ? LIMIT 1')
+          .get(candidateMotherId) as { user_id?: number | null; mother_id: string; company_name: string } | undefined;
         if (row) {
           return {
             motherId: normalizeMotherId(row.mother_id),
             companyName: row.company_name || 'Default Company',
+            userId: row.user_id != null ? Number(row.user_id) : undefined,
           };
         }
       } catch {}
-      // If valid format, accept tenant ID
       return {
         motherId: candidateMotherId,
         companyName: candidateMotherId,

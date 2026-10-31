@@ -163,24 +163,63 @@ export function validateSession(token: string | undefined | null): SessionUser |
   if (trimmed.split('.').length === 3) {
     try {
       const decoded = jwt.verify(trimmed, getJwtSecret()) as {
-        userId: number;
-        email: string;
+        sub?: string;
+        userId?: number;
+        email?: string;
+        mother_id?: number | string;
         motherId?: string;
         companyName?: string;
+        company_name?: string;
       };
       if (decoded && decoded.email) {
+        const normEmail = normalizeEmail(decoded.email);
         let user: { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
         try {
           user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?')
-            .get(decoded.email) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+            .get(normEmail) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
         } catch {
           // ignore
         }
+
+        // Auto-provision user record if token originated from PolarList backend
+        if (!user) {
+          const rawMotherId = decoded.mother_id || decoded.motherId || 'default';
+          const motherId = normalizeMotherId(String(rawMotherId));
+          const companyName = (decoded.companyName || decoded.company_name || 'PolarList User').trim();
+          let parsedUserId = decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId ? Number(decoded.userId) : null);
+          try {
+            if (parsedUserId && !isNaN(parsedUserId)) {
+              db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)').run(
+                parsedUserId,
+                motherId,
+                companyName,
+                normEmail,
+                'external_jwt_auth'
+              );
+            } else {
+              const res = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)').run(
+                motherId,
+                companyName,
+                normEmail,
+                'external_jwt_auth'
+              );
+              parsedUserId = Number(res.lastInsertRowid);
+            }
+            user = { id: parsedUserId, email: normEmail, mother_id: motherId, company_name: companyName };
+          } catch {
+            user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(normEmail) as any;
+          }
+        }
+
+        const effectiveUserId = user ? user.id : (decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId || 1));
+        const effectiveMotherId = (user && user.mother_id) || normalizeMotherId(String(decoded.mother_id || decoded.motherId || 'default'));
+        const effectiveCompanyName = (user && user.company_name) || decoded.companyName || decoded.company_name || 'Default Company';
+
         return {
-          userId: user ? user.id : (decoded.userId || 1),
-          email: decoded.email,
-          motherId: (user && user.mother_id) || decoded.motherId || 'default',
-          companyName: (user && user.company_name) || decoded.companyName || 'Default Company',
+          userId: effectiveUserId,
+          email: normEmail,
+          motherId: effectiveMotherId,
+          companyName: effectiveCompanyName,
         };
       }
     } catch {

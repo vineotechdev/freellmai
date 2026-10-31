@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getSetting, setSetting, getDb } from '../db/index.js';
-import { getTenantApiKey, regenerateTenantApiKey } from '../services/tenant.js';
+import { getTenantApiKey, regenerateTenantApiKey, getUserApiKey, regenerateUserApiKey } from '../services/tenant.js';
 import { applyProxyUrl, applyProxyMode, applyProxyEnabled, applyProxyBypass, applyFetchRelayToken, encodeFetchRelayToken, isProxyActive, getProxyUrl, getProxyMode, getFetchRelayToken, isProxyEnabled, getProxyBypassPlatforms, probeProxyUrl, fetchRelayUrlError, DEFAULT_PROXY_PROBE_TARGET, PROXY_MODES, PROXY_SCHEMES } from '../lib/proxy.js';
 import { getProvider } from '../providers/index.js';
 import type { Platform } from '@freellmapi/shared/types.js';
@@ -474,20 +474,22 @@ settingsRouter.put('/guardrails', (req: Request, res: Response) => {
   });
 });
 
-// Get the unified API key (scoped to tenant mother_id)
+// Get the unified API key (scoped to user & tenant mother_id)
 settingsRouter.get('/api-key', (req: Request, res: Response) => {
   const user = (req as any).user;
   const motherId = user?.motherId || 'default';
-  const apiKey = getTenantApiKey(motherId, user?.companyName);
-  res.json({ apiKey, motherId, companyName: user?.companyName });
+  const userId = user?.userId;
+  const apiKey = userId ? getUserApiKey(userId, motherId, user?.companyName) : getTenantApiKey(motherId, user?.companyName);
+  res.json({ apiKey, motherId, companyName: user?.companyName, userId });
 });
 
-// Regenerate the unified API key (scoped to tenant mother_id)
+// Regenerate the unified API key (scoped to user & tenant mother_id)
 settingsRouter.post('/api-key/regenerate', (req: Request, res: Response) => {
   const user = (req as any).user;
   const motherId = user?.motherId || 'default';
-  const newKey = regenerateTenantApiKey(motherId, user?.companyName);
-  res.json({ apiKey: newKey, motherId, companyName: user?.companyName });
+  const userId = user?.userId;
+  const newKey = userId ? regenerateUserApiKey(userId, motherId, user?.companyName) : regenerateTenantApiKey(motherId, user?.companyName);
+  res.json({ apiKey: newKey, motherId, companyName: user?.companyName, userId });
 });
 
 // Get the proxy settings

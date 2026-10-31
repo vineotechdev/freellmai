@@ -1579,7 +1579,7 @@ function cachedDecrypt(keyId: number, ct: string, iv: string, authTag: string): 
   return plain;
 }
 
-function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[], motherId?: string): RouteResult | null {
+function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[], motherId?: string, userId?: number): RouteResult | null {
   const db = getDb();
   const label = `${entry.platform}/${entry.model_id}`;
 
@@ -1590,23 +1590,50 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   const provider = getProvider(entry.platform as Platform)!;
 
   let allKeys: KeyRow[] = [];
-  if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    allKeys = db.prepare(
-      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
-    ).all(entry.platform, motherId) as KeyRow[];
+  // 1. Highest priority: User-specific keys
+  if (userId) {
+    try {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ?"
+      ).all(entry.platform, userId) as KeyRow[];
+    } catch {}
   }
-  if (allKeys.length === 0) {
-    allKeys = db.prepare(
-      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '')"
-    ).all(entry.platform) as KeyRow[];
+
+  // 2. Second priority: Tenant/company keys (where user_id is null or matches)
+  if (allKeys.length === 0 && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    try {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR user_id = ?)"
+      ).all(entry.platform, motherId, userId ?? 0) as KeyRow[];
+    } catch {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
+      ).all(entry.platform, motherId) as KeyRow[];
+    }
   }
-  if (allKeys.length === 0) {
+
+  // 3. Third priority: System default / unassigned keys
+  if (allKeys.length === 0 && (!motherId || motherId === 'all' || motherId.toLowerCase() === 'default')) {
+    try {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '') AND (user_id IS NULL OR user_id = ?)"
+      ).all(entry.platform, userId ?? 0) as KeyRow[];
+    } catch {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '')"
+      ).all(entry.platform) as KeyRow[];
+    }
+  }
+
+  // 4. Last resort fallback for test harnesses without tenant context
+  if (allKeys.length === 0 && !userId && (!motherId || motherId === 'all')) {
     allKeys = db.prepare(
       "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
     ).all(entry.platform) as KeyRow[];
   }
+
   if (allKeys.length === 0) {
-    diag?.push(`${label}: no enabled+healthy key for platform${motherId ? ` (tenant ${motherId})` : ''}`);
+    diag?.push(`${label}: no enabled+healthy key for platform${userId ? ` (user ${userId})` : motherId ? ` (tenant ${motherId})` : ''}`);
     return null;
   }
 
@@ -1911,7 +1938,7 @@ export function fitsContextWindow(_platform: string, contextWindow: number | nul
  * silently collapsed onto whatever else is available. `skipKeys` lets a slot
  * exclude keys it already failed on this request.
  */
-export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skipKeys?: Set<string>, motherId?: string): RouteResult | null {
+export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skipKeys?: Set<string>, motherId?: string, userId?: number): RouteResult | null {
   const db = getDb();
   const entry = getModelChainRow(db, modelDbId);
   if (!entry) return null;
@@ -1921,7 +1948,7 @@ export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skip
   // 400 is classified and retried downstream). Nothing is multiplied here —
   // estimatedTokens already carries the exact capped output reserve (#470).
   if (!rowFitsRequestSize(entry, estimatedTokens)) return null;
-  return selectKeyForModel(entry, estimatedTokens, skipKeys, undefined, motherId);
+  return selectKeyForModel(entry, estimatedTokens, skipKeys, undefined, motherId, userId);
 }
 
 function rowFitsRequestSize(entry: ChainRow, estimatedTokens: number): boolean {
@@ -2185,7 +2212,8 @@ export function routeRequest(
   skipPlatforms?: Set<string>,
   exactOutputReserve = 0,
   task?: 'code' | 'chat',
-  motherId?: string
+  motherId?: string,
+  userId?: number
 ): RouteResult {
   const db = getDb();
 
@@ -2404,7 +2432,7 @@ export function routeRequest(
     // first usable key's RouteResult, or null when the model has no key that
     // can serve right now — in which case we fall through to the next model in
     // the sorted chain for THIS request (no explicit penalty needed).
-    const route = selectKeyForModel(entry, estimatedTokens, skipKeys, diag, motherId);
+    const route = selectKeyForModel(entry, estimatedTokens, skipKeys, diag, motherId, userId);
     if (route) return route;
   }
 
