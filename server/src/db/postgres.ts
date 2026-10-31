@@ -73,6 +73,9 @@ export async function initPostgresSchema(): Promise<void> {
         company_name TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      DROP INDEX IF EXISTS idx_users_mother_id;
+      CREATE INDEX IF NOT EXISTS idx_users_mother_id ON users(mother_id) WHERE mother_id IS NOT NULL AND mother_id != '';
 
       CREATE TABLE IF NOT EXISTS tenant_api_keys (
         id SERIAL PRIMARY KEY,

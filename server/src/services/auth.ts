@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
-import { getJwtSecret, getTenantApiKey, normalizeMotherId } from './tenant.js';
+import { getJwtSecret, getTenantApiKey, getUserApiKey, normalizeMotherId } from './tenant.js';
 import { persistUserToPostgres } from '../db/postgres.js';
 
 // Dashboard authentication: email + password accounts with JWT & session
@@ -64,9 +64,12 @@ export function createUser(inputOrEmail: CreateUserInput | string, legacyPasswor
   }
 
   const normalized = normalizeEmail(email);
-  const existing = db.prepare('SELECT id FROM users WHERE email = ? AND mother_id = ?').get(normalized, motherId);
-  if (existing) {
-    const err = new Error('An account with that email already exists for this tenant') as any;
+  const normalizedMotherId = normalizeMotherId(motherId);
+
+  // 1. Enforce unique Email constraint: An email address can only belong to one user account
+  const existingEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(normalized);
+  if (existingEmail) {
+    const err = new Error('An account with that email already exists') as any;
     err.code = 'email_taken';
     throw err;
   }
@@ -79,24 +82,45 @@ export function createUser(inputOrEmail: CreateUserInput | string, legacyPasswor
     }
   } catch {}
 
+  // Ensure unique email index and mother_id lookup index on users table
+  try {
+    db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)').run();
+    db.prepare('DROP INDEX IF EXISTS idx_users_mother_id').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_users_mother_id ON users(mother_id)').run();
+  } catch {}
+
   let result;
   const passHash = hashPassword(password);
   try {
     result = db.prepare('INSERT INTO users (mother_id, company_name, qr_code, email, password_hash) VALUES (?, ?, ?, ?, ?)')
-      .run(motherId, companyName, qrCode, normalized, passHash);
-  } catch {
-    result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
-      .run(motherId, companyName, normalized, passHash);
+      .run(normalizedMotherId, companyName, qrCode, normalized, passHash);
+  } catch (err: any) {
+    if (err.message?.includes('UNIQUE constraint failed: users.email') || err.message?.includes('idx_users_email')) {
+      const e = new Error('An account with that email already exists') as any;
+      e.code = 'email_taken';
+      throw e;
+    }
+    try {
+      result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
+        .run(normalizedMotherId, companyName, normalized, passHash);
+    } catch (err2: any) {
+      if (err2.message?.includes('UNIQUE constraint failed: users.email') || err2.message?.includes('idx_users_email')) {
+        const e = new Error('An account with that email already exists') as any;
+        e.code = 'email_taken';
+        throw e;
+      }
+      throw err2;
+    }
   }
 
   const userId = Number(result.lastInsertRowid);
   // Ensure tenant API key exists
-  getTenantApiKey(motherId, companyName);
+  getTenantApiKey(normalizedMotherId, companyName);
 
   // Persist user to PostgreSQL
-  void persistUserToPostgres({ email: normalized, password_hash: passHash, mother_id: motherId, company_name: companyName });
+  void persistUserToPostgres({ email: normalized, password_hash: passHash, mother_id: normalizedMotherId, company_name: companyName });
 
-  return { userId, email: normalized, motherId, companyName, qrCode };
+  return { userId, email: normalized, motherId: normalizedMotherId, companyName, qrCode };
 }
 
 /** Verify credentials. Returns the user on success, null on failure. Supports optional motherId. */
@@ -214,6 +238,10 @@ export function validateSession(token: string | undefined | null): SessionUser |
         const effectiveUserId = user ? user.id : (decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId || 1));
         const effectiveMotherId = (user && user.mother_id) || normalizeMotherId(String(decoded.mother_id || decoded.motherId || 'default'));
         const effectiveCompanyName = (user && user.company_name) || decoded.companyName || decoded.company_name || 'Default Company';
+
+        try { getTenantApiKey(effectiveMotherId, effectiveCompanyName); } catch {}
+        try { getUserApiKey(effectiveUserId, effectiveMotherId, effectiveCompanyName); } catch {}
+        void persistUserToPostgres({ email: normEmail, password_hash: 'external_jwt_auth', mother_id: effectiveMotherId, company_name: effectiveCompanyName });
 
         return {
           userId: effectiveUserId,

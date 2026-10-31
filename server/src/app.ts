@@ -194,7 +194,12 @@ export function createApp(config?: Config) {
         allowedCorsOrigins.has('*') ||
         allowedCorsOrigins.has(origin) ||
         process.env.CORS_ORIGIN === '*' ||
-        process.env.CORS_ALLOW_ALL === 'true'
+        process.env.CORS_ALLOW_ALL === 'true' ||
+        /^https?:\/\/([a-zA-Z0-9-]+\.)*polarlist\.in(:[0-9]+)?$/.test(origin) ||
+        /^https?:\/\/localhost(:[0-9]+)?$/.test(origin) ||
+        /^https?:\/\/127\.0\.0\.1(:[0-9]+)?$/.test(origin) ||
+        origin.startsWith('capacitor://') ||
+        origin.startsWith('ionic://')
       ) {
         callback(null, true);
       } else {

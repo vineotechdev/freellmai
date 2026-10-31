@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, Sparkles } from 'lucide-react'
+import { ChevronDown, KeyRound, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { openCommandPalette } from '@/components/command-palette-state'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { UpdatesDialog } from '@/components/updates-dialog'
+import { LegalModal } from '@/components/legal-modal'
 import { OPEN_UPDATES_EVENT } from '@/lib/updates'
 import { Toaster } from '@/components/toaster'
 import { UpdateReminder } from '@/components/update-reminder'
@@ -185,6 +186,7 @@ function AccountMenuItems({
   onOpenUpdates,
   onChangeEmail,
   onChangePassword,
+  onOpenLegal,
 }: {
   showUpgrade: boolean
   upgradeLabel: string
@@ -198,6 +200,7 @@ function AccountMenuItems({
   onOpenUpdates: () => void
   onChangeEmail: () => void
   onChangePassword: () => void
+  onOpenLegal: (tab: 'terms' | 'privacy') => void
 }) {
   return (
     <>
@@ -214,6 +217,10 @@ function AccountMenuItems({
       <DropdownMenuItem onClick={onOpenUpdates}>
         <RefreshCw />
         {updatesLabel}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => onOpenLegal('terms')}>
+        <ShieldCheck />
+        Terms &amp; Privacy
       </DropdownMenuItem>
       {/* Desktop signs in with a hidden local account, so it has no credentials
           to change and no session to end. */}
@@ -301,6 +308,8 @@ function Navbar() {
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
+  const [legalOpen, setLegalOpen] = useState(false)
+  const [legalTab, setLegalTab] = useState<'terms' | 'privacy'>('terms')
   const { data: authData } = useAuthStatus()
   // The update pill lives outside the navbar; it asks for this dialog by event.
   useEffect(() => {
@@ -405,6 +414,7 @@ function Navbar() {
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
+                  onOpenLegal={(tab) => { setLegalTab(tab); setLegalOpen(true); }}
                 />
               </DropdownMenuContent>
             </DropdownMenu>
@@ -461,6 +471,7 @@ function Navbar() {
                   onOpenUpdates={() => setUpdatesOpen(true)}
                   onChangeEmail={() => setCredentialsMode('email')}
                   onChangePassword={() => setCredentialsMode('password')}
+                  onOpenLegal={(tab) => { setLegalTab(tab); setLegalOpen(true); }}
                 />
               </DropdownMenuContent>
             </DropdownMenu>
@@ -470,6 +481,7 @@ function Navbar() {
       <TenantBanner />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <UpdatesDialog open={updatesOpen} onOpenChange={setUpdatesOpen} />
+      <LegalModal open={legalOpen} onOpenChange={setLegalOpen} initialTab={legalTab} />
       {credentialsMode && (
         <ChangeCredentialsModal mode={credentialsMode} onClose={() => setCredentialsMode(null)} />
       )}

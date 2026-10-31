@@ -218,6 +218,15 @@ export function initDb(
 
   if (!isEncryptionKeyInitialized()) initEncryptionKey(db);
 
+  // Enforce unique constraints on users table (unique email, fast index on mother_id)
+  try {
+    db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)').run();
+  } catch {}
+  try {
+    db.prepare('DROP INDEX IF EXISTS idx_users_mother_id').run();
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_users_mother_id ON users(mother_id)').run();
+  } catch {}
+
   return db;
 }
 

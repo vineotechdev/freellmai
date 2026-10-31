@@ -16,7 +16,8 @@ import {
   normalizeEmail,
   desktopSessionToken,
 } from '../services/auth.js';
-import { signJwtToken, validatePolarQrCode } from '../services/tenant.js';
+import { signJwtToken, validatePolarQrCode, verifyPolarQrSecurityCheck, getTenantApiKey, getUserApiKey, normalizeMotherId } from '../services/tenant.js';
+import { persistUserToPostgres } from '../db/postgres.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import {
   generateResetCode,
@@ -30,22 +31,20 @@ export const authRouter = Router();
 
 const failedPasswordAttempts = new Map<number, number>();
 
-// Multi-tenant registration schema (accepts Polar QR code or manual motherId & companyName)
+// Multi-tenant registration schema (strictly requires Polar QR code; manual motherId/companyName disallowed)
 const registerSchema = z.object({
-  qrCode: z.string().trim().optional(),
-  motherId: z.string().trim().optional(),
-  companyName: z.string().trim().optional(),
+  qrCode: z.string().trim().min(1, 'PolarList QR or Scan code is required to register a company'),
   email: z.string().email('A valid email is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  setupCode: z.string().optional(),
 });
 
-// Signing up is the one place the address has to look like an address.
+// Signing up requires a valid Polar QR code
 const signupSchema = z.object({
+  qrCode: z.string().trim().min(1, 'PolarList QR or Scan code is required'),
   email: z.string().email('A valid email is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  qrCode: z.string().optional(),
-  motherId: z.string().optional(),
-  companyName: z.string().optional(),
+  setupCode: z.string().optional(),
 });
 
 const loginSchema = z.object({
@@ -229,7 +228,8 @@ authRouter.post('/validate-qr', async (req: Request, res: Response) => {
   res.json(result);
 });
 
-// Multi-tenant registration: creates user with Polar QR code or mother_id & company_name
+// Multi-tenant registration: strictly requires Polar QR code with dual verification.
+// Manual entry of motherId and companyName is completely disallowed.
 authRouter.post('/register', async (req: Request, res: Response) => {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -237,59 +237,64 @@ authRouter.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  let motherId = parsed.data.motherId ? parsed.data.motherId.trim() : '';
-  let companyName = parsed.data.companyName ? parsed.data.companyName.trim() : '';
-  const qrCodeInput = parsed.data.qrCode ? parsed.data.qrCode.trim() : '';
+  const qrCodeInput = parsed.data.qrCode.trim();
 
-  // If QR code is provided, validate internally against Polar backend
-  if (qrCodeInput) {
-    const qrResult = await validatePolarQrCode(qrCodeInput);
-    if (!qrResult.valid || !qrResult.motherId) {
-      res.status(400).json({
-        error: {
-          message: qrResult.message || 'Invalid PolarList scan code. Please check with your administrator.',
-          type: 'invalid_qr_code',
-        },
-      });
-      return;
-    }
-    motherId = String(qrResult.motherId);
-    companyName = qrResult.companyName || companyName || `Company ${motherId}`;
-  }
-
-  if (!motherId || !companyName) {
-    res.status(400).json({
+  // Verification 1: Upstream verification against PolarList backend
+  const qrResult = await validatePolarQrCode(qrCodeInput);
+  if (!qrResult.valid || !qrResult.motherId) {
+    res.status(403).json({
       error: {
-        message: 'Polar QR code or Scan Key is required to register your company account.',
-        type: 'missing_tenant_info',
+        message: qrResult.message || 'QR verification failed: Only verified PolarList company users can register.',
+        type: 'invalid_qr_code',
       },
     });
     return;
   }
 
+  // Verification 2: Secondary internal security verification inside Node.js
+  const securityCheck = verifyPolarQrSecurityCheck(qrCodeInput, qrResult);
+  if (!securityCheck.ok || !securityCheck.motherId || !securityCheck.companyName) {
+    res.status(403).json({
+      error: {
+        message: securityCheck.reason || 'Secondary security verification failed. Unauthorized company tenant.',
+        type: 'security_verification_failed',
+      },
+    });
+    return;
+  }
+
+  const motherId = securityCheck.motherId;
+  const companyName = securityCheck.companyName;
+
   try {
     const user = createUser({
       motherId,
       companyName,
-      qrCode: qrCodeInput || undefined,
+      qrCode: qrCodeInput,
       email: parsed.data.email,
       password: parsed.data.password,
     });
     clearSetupCode();
-    createSession(user.userId);
-    const token = signJwtToken({
+    const sessionToken = createSession(user.userId);
+    const jwtToken = signJwtToken({
       userId: user.userId,
       email: user.email,
       motherId: user.motherId,
       companyName: user.companyName,
     });
     res.status(201).json({
-      token,
+      token: jwtToken,
+      jwtToken,
+      sessionToken,
       email: user.email,
       motherId: user.motherId,
       companyName: user.companyName,
     });
   } catch (err: any) {
+    if (err.code === 'mother_id_taken' || err.code === 'email_taken') {
+      res.status(409).json({ error: { message: err.message, type: err.code } });
+      return;
+    }
     res.status(400).json({ error: { message: err.message || 'Registration failed' } });
   }
 });
@@ -297,55 +302,71 @@ authRouter.post('/register', async (req: Request, res: Response) => {
 // First-run account creation or setup.
 authRouter.post('/setup', async (req: Request, res: Response) => {
   if (userCount() > 0) {
-    // In multi-tenant mode, forward to registration if users already exist
+    // In multi-tenant mode, registration is used once initialized
     const parsedReg = registerSchema.safeParse(req.body);
-    if (parsedReg.success) {
-      let motherId = parsedReg.data.motherId ? parsedReg.data.motherId.trim() : '';
-      let companyName = parsedReg.data.companyName ? parsedReg.data.companyName.trim() : '';
-      const qrCodeInput = parsedReg.data.qrCode ? parsedReg.data.qrCode.trim() : '';
-
-      if (qrCodeInput) {
-        const qrResult = await validatePolarQrCode(qrCodeInput);
-        if (qrResult.valid && qrResult.motherId) {
-          motherId = String(qrResult.motherId);
-          companyName = qrResult.companyName || companyName || `Company ${motherId}`;
-        }
-      }
-
-      if (motherId && companyName) {
-        try {
-          const user = createUser({
-            motherId,
-            companyName,
-            qrCode: qrCodeInput || undefined,
-            email: parsedReg.data.email,
-            password: parsedReg.data.password,
-          });
-          const sessionToken = createSession(user.userId);
-          const jwtToken = signJwtToken({
-            userId: user.userId,
-            email: user.email,
-            motherId: user.motherId,
-            companyName: user.companyName,
-          });
-          res.status(201).json({
-            token: jwtToken,
-            jwtToken,
-            sessionToken,
-            email: user.email,
-            motherId: user.motherId,
-            companyName: user.companyName,
-          });
-          return;
-        } catch (err: any) {
-          res.status(400).json({ error: { message: err.message || 'Registration failed' } });
-          return;
-        }
-      }
+    if (!parsedReg.success) {
+      clearSetupCode();
+      res.status(409).json({ error: { message: 'Setup already completed. Use login or register instead.', type: 'setup_complete' } });
+      return;
     }
-    clearSetupCode();
-    res.status(409).json({ error: { message: 'Setup already completed. Use login or register instead.', type: 'setup_complete' } });
-    return;
+
+    const qrCodeInput = parsedReg.data.qrCode.trim();
+    // Verification 1
+    const qrResult = await validatePolarQrCode(qrCodeInput);
+    if (!qrResult.valid || !qrResult.motherId) {
+      res.status(403).json({
+        error: {
+          message: qrResult.message || 'QR verification failed: Only verified PolarList company users can register.',
+          type: 'invalid_qr_code',
+        },
+      });
+      return;
+    }
+
+    // Verification 2
+    const securityCheck = verifyPolarQrSecurityCheck(qrCodeInput, qrResult);
+    if (!securityCheck.ok || !securityCheck.motherId || !securityCheck.companyName) {
+      res.status(403).json({
+        error: {
+          message: securityCheck.reason || 'Secondary security verification failed.',
+          type: 'security_verification_failed',
+        },
+      });
+      return;
+    }
+
+    try {
+      const user = createUser({
+        motherId: securityCheck.motherId,
+        companyName: securityCheck.companyName,
+        qrCode: qrCodeInput,
+        email: parsedReg.data.email,
+        password: parsedReg.data.password,
+      });
+      const sessionToken = createSession(user.userId);
+      const jwtToken = signJwtToken({
+        userId: user.userId,
+        email: user.email,
+        motherId: user.motherId,
+        companyName: user.companyName,
+      });
+      res.status(201).json({
+        token: jwtToken,
+        jwtToken,
+        sessionToken,
+        email: user.email,
+        motherId: user.motherId,
+        companyName: user.companyName,
+      });
+      return;
+    } catch (err: any) {
+      if (err.code === 'mother_id_taken' || err.code === 'email_taken') {
+        res.status(409).json({ error: { message: err.message, type: err.code } });
+        return;
+      }
+      res.status(400).json({ error: { message: err.message || 'Registration failed' } });
+      return;
+    }
   }
 
   if (!isLoopbackRemote(req) && !setupCodeMatches((req.body ?? {}).setupCode)) {
@@ -359,33 +380,68 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
     return;
   }
 
-  const parsed = signupSchema.safeParse(req.body);
+  const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
-  const user = createUser({
-    email: parsed.data.email,
-    password: parsed.data.password,
-    motherId: parsed.data.motherId,
-    companyName: parsed.data.companyName,
-  });
-  clearSetupCode();
-  const sessionToken = createSession(user.userId);
-  const jwtToken = signJwtToken({
-    userId: user.userId,
-    email: user.email,
-    motherId: user.motherId,
-    companyName: user.companyName,
-  });
-  res.status(201).json({
-    token: jwtToken,
-    jwtToken,
-    sessionToken,
-    email: user.email,
-    motherId: user.motherId,
-    companyName: user.companyName,
-  });
+
+  const qrCodeInput = parsed.data.qrCode.trim();
+  // Verification 1
+  const qrResult = await validatePolarQrCode(qrCodeInput);
+  if (!qrResult.valid || !qrResult.motherId) {
+    res.status(403).json({
+      error: {
+        message: qrResult.message || 'QR verification failed: Only verified PolarList company users can register.',
+        type: 'invalid_qr_code',
+      },
+    });
+    return;
+  }
+
+  // Verification 2
+  const securityCheck = verifyPolarQrSecurityCheck(qrCodeInput, qrResult);
+  if (!securityCheck.ok || !securityCheck.motherId || !securityCheck.companyName) {
+    res.status(403).json({
+      error: {
+        message: securityCheck.reason || 'Secondary security verification failed.',
+        type: 'security_verification_failed',
+      },
+    });
+    return;
+  }
+
+  try {
+    const user = createUser({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      motherId: securityCheck.motherId,
+      companyName: securityCheck.companyName,
+      qrCode: qrCodeInput,
+    });
+    clearSetupCode();
+    const sessionToken = createSession(user.userId);
+    const jwtToken = signJwtToken({
+      userId: user.userId,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+    });
+    res.status(201).json({
+      token: jwtToken,
+      jwtToken,
+      sessionToken,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+    });
+  } catch (err: any) {
+    if (err.code === 'mother_id_taken' || err.code === 'email_taken') {
+      res.status(409).json({ error: { message: err.message, type: err.code } });
+      return;
+    }
+    res.status(400).json({ error: { message: err.message || 'Setup failed' } });
+  }
 });
 
 authRouter.post('/login', (req: Request, res: Response) => {
@@ -430,6 +486,138 @@ authRouter.post('/login', (req: Request, res: Response) => {
 authRouter.post('/logout', (req: Request, res: Response) => {
   deleteSession(bearer(req));
   res.json({ success: true });
+});
+
+authRouter.post('/activate-ai', async (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const token = bearer(req);
+    let decodedUser: any = null;
+    if (token) {
+      decodedUser = validateSession(token);
+    }
+
+    const email = (req.body.email || decodedUser?.email || '').trim().toLowerCase();
+    const rawMotherId = req.body.motherId || req.body.mother_id || decodedUser?.motherId || 'default';
+    const motherId = normalizeMotherId(String(rawMotherId));
+    const companyName = (req.body.companyName || req.body.company_name || decodedUser?.companyName || 'PolarList Company').trim();
+    const parsedUserId = req.body.userId != null ? Number(req.body.userId) : (decodedUser?.userId != null ? Number(decodedUser.userId) : null);
+
+    if (!email) {
+      res.status(400).json({ error: { message: 'Email is required to activate AI' } });
+      return;
+    }
+
+    // Check if user already exists with this email
+    let existingUser = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(email) as any;
+    if (existingUser) {
+      const apiKey = getUserApiKey(existingUser.id, existingUser.mother_id || motherId, existingUser.company_name || companyName);
+      res.json({
+        ok: true,
+        alreadyActive: true,
+        message: 'Already activated, start using it!',
+        apiKey,
+        user: {
+          id: existingUser.id,
+          email: existingUser.email,
+          motherId: existingUser.mother_id,
+          companyName: existingUser.company_name
+        }
+      });
+      return;
+    }
+
+    // Check if company with this mother_id exists
+    const existingCompany = db.prepare('SELECT id, mother_id, company_name FROM tenant_api_keys WHERE mother_id = ?').get(motherId) as any
+      || db.prepare('SELECT id, mother_id, company_name FROM users WHERE mother_id = ?').get(motherId) as any;
+
+    if (!existingCompany) {
+      // Company is absent: create company tenant key
+      getTenantApiKey(motherId, companyName);
+    }
+
+    // Register this user
+    let newUserId = parsedUserId;
+    try {
+      if (newUserId && !isNaN(newUserId)) {
+        db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)').run(
+          newUserId,
+          motherId,
+          companyName,
+          email,
+          'external_jwt_auth'
+        );
+      } else {
+        const ins = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)').run(
+          motherId,
+          companyName,
+          email,
+          'external_jwt_auth'
+        );
+        newUserId = Number(ins.lastInsertRowid);
+      }
+    } catch {
+      existingUser = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(email) as any;
+      if (existingUser) {
+        newUserId = existingUser.id;
+      }
+    }
+
+    // Generate personal unified API key for user
+    const apiKey = getUserApiKey(newUserId!, motherId, companyName);
+
+    // Persist to PostgreSQL / Neon DB
+    void persistUserToPostgres({ email, password_hash: 'external_jwt_auth', mother_id: motherId, company_name: companyName });
+
+    res.json({
+      ok: true,
+      alreadyActive: false,
+      message: 'AI activated successfully!',
+      apiKey,
+      user: {
+        id: newUserId,
+        email,
+        motherId,
+        companyName
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err.message || 'Failed to activate AI' } });
+  }
+});
+
+authRouter.get('/ai-status', (req: Request, res: Response) => {
+  try {
+    const db = getDb();
+    const token = bearer(req);
+    const session = token ? validateSession(token) : null;
+    const email = (req.query.email as string || session?.email || '').trim().toLowerCase();
+
+    if (!email) {
+      res.status(400).json({ error: { message: 'Email or Bearer token is required' } });
+      return;
+    }
+
+    const user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(email) as any;
+    if (!user) {
+      res.json({ activated: false });
+      return;
+    }
+
+    const apiKey = getUserApiKey(user.id, user.mother_id, user.company_name);
+    res.json({
+      activated: true,
+      apiKey,
+      user: {
+        id: user.id,
+        email: user.email,
+        motherId: user.mother_id,
+        companyName: user.company_name
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err.message || 'Failed to retrieve AI status' } });
+  }
 });
 
 authRouter.get('/me', (req: Request, res: Response) => {

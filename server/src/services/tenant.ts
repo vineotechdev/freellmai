@@ -89,6 +89,80 @@ export async function validatePolarQrCode(rawCode: string): Promise<PolarQrValid
   }
 }
 
+/**
+ * Secondary security check executed strictly in Node.js backend:
+ * Verifies code format, prevents injections, checks company active status,
+ * and ensures only legitimate PolarList verified company tenants can proceed with registration.
+ */
+export function verifyPolarQrSecurityCheck(
+  rawCode: string,
+  qrResult: PolarQrValidationResult
+): { ok: boolean; reason?: string; motherId?: string; companyName?: string } {
+  const code = extractQrCode(rawCode);
+
+  if (!code || typeof code !== 'string') {
+    return { ok: false, reason: 'PolarList QR code or scan token is required.' };
+  }
+
+  // 1. Length and character boundaries to prevent malicious injection
+  if (code.length < 6 || code.length > 128) {
+    return { ok: false, reason: 'Invalid PolarList QR code length.' };
+  }
+
+  // Disallow suspicious injection patterns
+  if (/[\r\n\t<>"';`\0]/.test(code)) {
+    return { ok: false, reason: 'Suspicious characters detected in QR code payload.' };
+  }
+
+  // 2. Upstream Polar verification result check
+  if (!qrResult.valid) {
+    return {
+      ok: false,
+      reason: qrResult.message || 'PolarList QR code verification failed. Access denied.',
+    };
+  }
+
+  // 3. Polar tenant active status check
+  if (qrResult.isActive === false) {
+    return {
+      ok: false,
+      reason: 'This company tenant account or QR code has been deactivated in PolarList.',
+    };
+  }
+
+  // 4. Mother ID integrity check
+  const rawMotherId = qrResult.motherId != null ? String(qrResult.motherId).trim() : '';
+  if (!rawMotherId || rawMotherId.length < 1 || rawMotherId === '0') {
+    return {
+      ok: false,
+      reason: 'No valid PolarList Mother ID associated with this QR code.',
+    };
+  }
+
+  // Must only contain alphanumeric and safe characters
+  if (!/^[a-zA-Z0-9_-]+$/.test(rawMotherId)) {
+    return {
+      ok: false,
+      reason: 'PolarList Mother ID format is invalid or contains prohibited characters.',
+    };
+  }
+
+  // 5. Company Name integrity check
+  const rawCompanyName = qrResult.companyName ? qrResult.companyName.trim() : '';
+  if (!rawCompanyName || rawCompanyName.length < 2) {
+    return {
+      ok: false,
+      reason: 'No valid PolarList Company Name associated with this QR code.',
+    };
+  }
+
+  return {
+    ok: true,
+    motherId: normalizeMotherId(rawMotherId),
+    companyName: rawCompanyName,
+  };
+}
+
 export function normalizeMotherId(id: string): string {
   return id.trim().toUpperCase();
 }

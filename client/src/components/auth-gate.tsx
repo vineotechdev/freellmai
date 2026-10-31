@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { isEmail } from '@/lib/validate'
 import { useI18n } from '@/i18n'
 import { toast } from '@/lib/toast'
+import { LegalModal } from '@/components/legal-modal'
 
 // Matches the server rule (routes/auth.ts zod schema).
 const PASSWORD_MIN = 8
@@ -67,9 +68,6 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
   const [verifyingQr, setVerifyingQr] = useState(false)
   const [verifiedCompany, setVerifiedCompany] = useState<{ motherId: string; companyName: string } | null>(null)
   const [qrVerifyError, setQrVerifyError] = useState('')
-  const [showManual, setShowManual] = useState(false)
-  const [motherId, setMotherId] = useState('')
-  const [companyName, setCompanyName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [setupCode, setSetupCode] = useState('')
@@ -78,6 +76,8 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [showForgot, setShowForgot] = useState(false)
+  const [legalOpen, setLegalOpen] = useState(false)
+  const [legalTab, setLegalTab] = useState<'terms' | 'privacy'>('terms')
 
   const isRegister = activeTab === 'register'
 
@@ -125,13 +125,11 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
           companyName: res.companyName || `Company ${res.motherId}`,
         }
         setVerifiedCompany(info)
-        setMotherId(info.motherId)
-        setCompanyName(info.companyName)
         setQrVerifyError('')
         return info
       } else {
         setVerifiedCompany(null)
-        setQrVerifyError(res.message || 'Invalid scan code. Please check with your administrator.')
+        setQrVerifyError(res.message || 'Invalid PolarList scan code. Only verified company users can register.')
         return null
       }
     } catch (err: any) {
@@ -143,18 +141,8 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     }
   }
 
-  const qrCodeError = isRegister && !showManual && !qrCode.trim()
-    ? 'PolarList QR code or scan key is required'
-    : null
-
-  const motherIdError = isRegister && showManual && !motherId.trim()
-    ? 'Mother ID is required'
-    : isRegister && showManual && motherId.trim().length < 2
-      ? 'Mother ID must be at least 2 characters'
-      : null
-
-  const companyNameError = isRegister && showManual && !companyName.trim()
-    ? 'Company name is required'
+  const qrCodeError = isRegister && !qrCode.trim()
+    ? 'PolarList QR code or scan key is required to register a company'
     : null
 
   const emailError = !email.trim()
@@ -168,9 +156,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       ? t('validation.passwordMin', { min: PASSWORD_MIN })
       : null
 
-  const showQrError = attempted && !showManual && (!qrCode.trim() || !!qrVerifyError)
-  const showMotherIdError = attempted && showManual && !!motherIdError
-  const showCompanyNameError = attempted && showManual && !!companyNameError
+  const showQrError = attempted && (!qrCode.trim() || !!qrVerifyError)
   const showEmailError = attempted && !!emailError
   const showPasswordError = attempted && !!passwordError
 
@@ -182,13 +168,21 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     }
 
     if (isRegister) {
-      if (!showManual && !qrCode.trim()) {
+      if (!qrCode.trim()) {
         setAttempted(true)
         return
       }
-      if (showManual && (motherIdError || companyNameError)) {
-        setAttempted(true)
-        return
+
+      // Strict enforcement: Must verify QR code before registration can proceed
+      let company = verifiedCompany
+      if (!company) {
+        setBusy(true)
+        company = await verifyQrCode(qrCode.trim())
+        if (!company) {
+          setBusy(false)
+          setAttempted(true)
+          return
+        }
       }
     }
 
@@ -197,25 +191,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     try {
       const payload: Record<string, string> = { email, password }
       if (isRegister) {
-        if (!showManual) {
-          payload.qrCode = qrCode.trim()
-          // Automatically verify if not verified yet
-          if (!verifiedCompany) {
-            const info = await verifyQrCode(qrCode.trim())
-            if (!info) {
-              setBusy(false)
-              return
-            }
-            payload.motherId = info.motherId
-            payload.companyName = info.companyName
-          } else {
-            payload.motherId = verifiedCompany.motherId
-            payload.companyName = verifiedCompany.companyName
-          }
-        } else {
-          payload.motherId = motherId.trim().toUpperCase()
-          payload.companyName = companyName.trim()
-        }
+        payload.qrCode = qrCode.trim()
       }
       if (setupCode) payload.setupCode = setupCode.trim()
 
@@ -226,7 +202,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       })
       setToken(res.jwtToken || res.token)
       onAuthed()
-    } catch (err) {
+    } catch (err: any) {
       if ((err as ApiError).code === 'setup_code_required') {
         setCodeRequired(true)
       }
@@ -281,12 +257,12 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
         </h1>
         <p className="text-xs text-muted-foreground mt-1 mb-5">
           {isRegister
-            ? 'Scan or enter your PolarList QR key to link company identity and get a dedicated LLM gateway.'
+            ? 'Scan or enter your PolarList QR key to link verified company identity and get a dedicated LLM gateway.'
             : 'Sign in to access your tenant LLM gateway, API keys, and models.'}
         </p>
 
         <form onSubmit={submit} className="space-y-3.5" noValidate>
-          {isRegister && !showManual && (
+          {isRegister && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium flex items-center gap-1.5" htmlFor="auth-qr-code">
@@ -344,62 +320,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
                   </div>
                 </div>
               )}
-
-              <div className="pt-1 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => { setShowManual(true); setQrVerifyError(''); }}
-                  className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                >
-                  Don't have a QR code? Enter manually
-                </button>
-              </div>
             </div>
-          )}
-
-          {isRegister && showManual && (
-            <>
-              <div className="space-y-1">
-                <Label className="text-xs font-medium" htmlFor="auth-mother-id">
-                  Mother ID <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="auth-mother-id"
-                  type="text"
-                  autoCapitalize="characters"
-                  value={motherId}
-                  onChange={e => setMotherId(e.target.value.toUpperCase())}
-                  placeholder="e.g. 4141 or POLAR_CORP_01"
-                  aria-invalid={showMotherIdError}
-                />
-                {attempted && <FieldError id="auth-mother-id-error" error={motherIdError} />}
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs font-medium" htmlFor="auth-company-name">
-                  Company Name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="auth-company-name"
-                  type="text"
-                  value={companyName}
-                  onChange={e => setCompanyName(e.target.value)}
-                  placeholder="e.g. SM Infra Projects"
-                  aria-invalid={showCompanyNameError}
-                />
-                {attempted && <FieldError id="auth-company-name-error" error={companyNameError} />}
-              </div>
-
-              <div className="pt-0.5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowManual(false)}
-                  className="text-[10px] text-primary hover:underline font-medium flex items-center gap-1"
-                >
-                  <QrCode className="size-3" /> Use PolarList QR Code instead
-                </button>
-              </div>
-            </>
           )}
 
           <div className="space-y-1">
@@ -460,7 +381,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 
           <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
             {busy && <Loader2 className="animate-spin" aria-hidden />}
-            {busy ? (isRegister ? 'Registering Account...' : t('auth.signingIn')) : isRegister ? (verifiedCompany ? `Register for ${verifiedCompany.companyName}` : 'Register Company') : t('auth.signIn')}
+            {busy ? (isRegister ? 'Registering Account...' : t('auth.signingIn')) : isRegister ? (verifiedCompany ? `Register for ${verifiedCompany.companyName}` : 'Verify QR & Register Company') : t('auth.signIn')}
           </Button>
         </form>
 
@@ -473,7 +394,34 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
             {t('auth.forgotPassword')}
           </button>
         )}
+
+        {/* PolarList Legal Notice & Links */}
+        <div className="mt-4 pt-3.5 border-t border-border/50 text-center text-[11px] text-muted-foreground leading-normal">
+          By signing in or registering, you agree to our{' '}
+          <button
+            type="button"
+            onClick={() => { setLegalTab('terms'); setLegalOpen(true); }}
+            className="font-medium text-primary hover:underline underline-offset-2"
+          >
+            Terms &amp; Conditions
+          </button>
+          {' '}and{' '}
+          <button
+            type="button"
+            onClick={() => { setLegalTab('privacy'); setLegalOpen(true); }}
+            className="font-medium text-primary hover:underline underline-offset-2"
+          >
+            Privacy Policy
+          </button>
+          .
+        </div>
       </div>
+
+      <LegalModal
+        open={legalOpen}
+        onOpenChange={setLegalOpen}
+        initialTab={legalTab}
+      />
     </Centered>
   )
 }
