@@ -25,25 +25,28 @@ export function getDb(): Db {
 }
 
 export function getDefaultDbPath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return '/tmp/freeapi.db';
+  }
   return process.env.FREEAPI_DB_PATH?.trim() || DB_PATH;
 }
 
-/** Default factory: opens a better-sqlite3 connection at the given path. */
+/** Default factory: opens a better-sqlite3 connection, falling back to node:sqlite if unavailable. */
 function betterSqliteFactory(resolvedPath: string): Db {
-  let BetterSqlite: new (path: string) => unknown;
   try {
-    BetterSqlite = runtimeRequire('better-sqlite3') as new (path: string) => unknown;
-  } catch (cause) {
-    throw new Error(
-      'better-sqlite3 is not installed. Reinstall dependencies, or use Node.js 22.13+ on Android/Termux.',
-      { cause },
-    );
+    const BetterSqlite = runtimeRequire('better-sqlite3') as new (path: string) => unknown;
+    return new BetterSqlite(resolvedPath) as Db;
+  } catch {
+    // If better-sqlite3 is not compiled or unavailable (e.g. cloud/serverless/Linux container), use built-in node:sqlite
+    return nodeSqliteFactory(resolvedPath);
   }
-  return new BetterSqlite(resolvedPath) as Db;
 }
 
 export function defaultDbFactory(platform: NodeJS.Platform = process.platform): DbFactory {
-  return platform === 'android' ? nodeSqliteFactory : betterSqliteFactory;
+  if (platform === 'android' || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return nodeSqliteFactory;
+  }
+  return betterSqliteFactory;
 }
 
 export function connectDb(
