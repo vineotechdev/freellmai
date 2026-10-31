@@ -237,16 +237,34 @@ export function accountEmail(): string | null {
 }
 
 /**
- * Reset the password for the single existing user and invalidate all
+ * Reset the password for a user (by email, or the single existing user) and invalidate all
  * sessions.
  * Returns the user, or null if no user exists.
  */
-export function resetUserPassword(newPassword: string): SessionUser | null {
+export function resetUserPassword(newPassword: string, targetEmail?: string): SessionUser | null {
   const db = getDb();
-  const row = db.prepare('SELECT id, email, mother_id, company_name FROM users LIMIT 1').get() as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+  let row: { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+
+  if (targetEmail && targetEmail.trim()) {
+    const norm = normalizeEmail(targetEmail);
+    row = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(norm) as any;
+  } else {
+    row = db.prepare('SELECT id, email, mother_id, company_name FROM users ORDER BY id DESC LIMIT 1').get() as any;
+  }
+
   if (!row) return null;
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), row.id);
+  const newHash = hashPassword(newPassword);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, row.id);
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.id);
+
+  // Persist updated password to PostgreSQL
+  void persistUserToPostgres({
+    email: row.email,
+    password_hash: newHash,
+    mother_id: row.mother_id,
+    company_name: row.company_name,
+  });
+
   return {
     userId: row.id,
     email: row.email,

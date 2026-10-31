@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, QrCode, CheckCircle2, Building2, AlertCircle } from 'lucide-react'
+import { Loader2, QrCode, CheckCircle2, Building2, AlertCircle, Mail, KeyRound, ArrowLeft } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field-error'
@@ -237,7 +237,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
   }
 
   if (showForgot && !isRegister) {
-    return <ForgotPasswordForm onBack={() => setShowForgot(false)} onAuthed={onAuthed} />
+    return <ForgotPasswordForm onBack={() => setShowForgot(false)} onAuthed={onAuthed} initialEmail={email} />
   }
 
   return (
@@ -482,28 +482,70 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 
 type ForgotStep = 'request' | 'reset' | 'done'
 
-function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed: () => void }) {
+function ForgotPasswordForm({
+  onBack,
+  onAuthed,
+  initialEmail = '',
+}: {
+  onBack: () => void
+  onAuthed: () => void
+  initialEmail?: string
+}) {
   const { t } = useI18n()
   const [step, setStep] = useState<ForgotStep>('request')
+  const [email, setEmail] = useState(initialEmail)
   const [resetCode, setResetCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
+  const [cooldown, setCooldown] = useState(0)
+
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const timer = setInterval(() => {
+      setCooldown(c => Math.max(0, c - 1))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [cooldown])
+
+  const emailError = !email.trim()
+    ? t('validation.required')
+    : !isEmail(email)
+      ? t('validation.email')
+      : null
 
   const passwordError = !newPassword
     ? t('validation.required')
     : newPassword.length < PASSWORD_MIN
       ? t('validation.passwordMin', { min: PASSWORD_MIN })
       : null
+
+  const confirmError = !confirmPassword
+    ? t('validation.required')
+    : confirmPassword !== newPassword
+      ? 'Passwords do not match'
+      : null
+
   const codeError = !resetCode.trim() ? t('validation.required') : null
 
-  async function requestCode() {
+  async function requestCode(e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    if (emailError) {
+      setAttempted(true)
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      await apiFetch('/api/auth/forgot-password', { method: 'POST' })
+      await apiFetch<{ success: boolean; email?: string; message?: string }>('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim() }),
+      })
       setStep('reset')
+      setCooldown(30)
+      setAttempted(false)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -513,21 +555,44 @@ function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed
 
   async function submitReset(e: React.FormEvent) {
     e.preventDefault()
-    if (codeError || passwordError) {
+    if (codeError || passwordError || confirmError) {
       setAttempted(true)
       return
     }
     setBusy(true)
     setError('')
     try {
-      const res = await apiFetch<{ token?: string }>('/api/auth/reset-password', {
+      const res = await apiFetch<{
+        token?: string
+        jwtToken?: string
+        apiKey?: string
+        email?: string
+        motherId?: string
+        companyName?: string
+      }>('/api/auth/reset-password', {
         method: 'POST',
-        body: JSON.stringify({ resetCode: resetCode.trim(), newPassword }),
+        body: JSON.stringify({
+          email: email.trim(),
+          resetCode: resetCode.trim(),
+          newPassword,
+        }),
       })
-      // The server signs the operator in after a reset, so nobody has to
-      // remember which email the account uses (#1477).
+
+      // Store tokens and company metadata
       if (res.token) {
         setToken(res.token)
+      }
+      if (res.jwtToken) {
+        localStorage.setItem('freellmapi_jwt', res.jwtToken)
+      }
+      if (res.motherId) {
+        localStorage.setItem('freellmapi_mother_id', res.motherId)
+      }
+      if (res.companyName) {
+        localStorage.setItem('freellmapi_company_name', res.companyName)
+      }
+
+      if (res.token || res.jwtToken) {
         onAuthed()
         return
       }
@@ -545,38 +610,110 @@ function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed
         <span className="inline-block size-2 rounded-full bg-foreground" />
         <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
       </div>
-      <div className="rounded-3xl border bg-card p-6">
-        <h1 className="text-base font-medium">{t('auth.forgotPassword')}</h1>
+      <div className="rounded-3xl border bg-card p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary">
+            <KeyRound className="size-5" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold">{t('auth.forgotPassword')}</h1>
+            <p className="text-xs text-muted-foreground">
+              {step === 'request' ? 'Request a verification code' : 'Set a new password'}
+            </p>
+          </div>
+        </div>
 
         {step === 'request' && (
-          <div className="mt-1 space-y-3">
-            <p className="text-xs text-muted-foreground mb-4">{t('auth.forgotPasswordDescription')}</p>
-            {error && <p className="text-destructive text-xs">{error}</p>}
-            <Button className="w-full" disabled={busy} onClick={requestCode}>
-              {busy ? t('auth.requestingResetCode') : t('auth.requestResetCode')}
+          <form onSubmit={requestCode} className="space-y-4" noValidate>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Enter the email address registered with your account. We will send a unique 6-digit reset code to your inbox.
+            </p>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium" htmlFor="forgot-email">
+                Account Email <span className="text-destructive">*</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  aria-invalid={attempted && !!emailError}
+                  className="ps-9"
+                />
+                <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+              {attempted && <FieldError error={emailError} />}
+            </div>
+
+            {error && (
+              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full h-10" disabled={busy}>
+              {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
+              {busy ? 'Sending Reset Code...' : 'Send Reset Code to Email'}
             </Button>
-          </div>
+          </form>
         )}
 
         {step === 'reset' && (
-          <form onSubmit={submitReset} className="space-y-3 mt-4" noValidate>
-            <p className="text-xs text-muted-foreground">{t('auth.resetCodeHint')}</p>
-            <p className="text-xs text-muted-foreground">{t('auth.resetCodeDockerHint')}</p>
+          <form onSubmit={submitReset} className="space-y-3.5" noValidate>
+            <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs space-y-1">
+              <p className="font-medium text-foreground flex items-center gap-1.5">
+                <CheckCircle2 className="size-3.5 text-emerald-500" /> Reset code sent!
+              </p>
+              <p className="text-muted-foreground">
+                We sent a 6-digit code to <strong className="text-foreground">{email}</strong>.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setStep('request'); setError(''); setAttempted(false); }}
+                className="text-[11px] text-primary hover:underline font-medium pt-1 block"
+              >
+                Change email address
+              </button>
+            </div>
+
             <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="reset-code">{t('auth.resetCode')}</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium" htmlFor="reset-code">
+                  6-Digit Verification Code <span className="text-destructive">*</span>
+                </Label>
+                <button
+                  type="button"
+                  disabled={busy || cooldown > 0}
+                  onClick={() => requestCode()}
+                  className="text-[11px] text-primary hover:underline disabled:opacity-50 disabled:no-underline font-medium"
+                >
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+                </button>
+              </div>
               <Input
                 id="reset-code"
                 type="text"
-                autoComplete="off"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={6}
                 value={resetCode}
-                onChange={e => setResetCode(e.target.value)}
-                placeholder={t('auth.resetCodePlaceholder')}
+                onChange={e => setResetCode(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))}
+                placeholder="e.g. 582914"
                 aria-invalid={attempted && !!codeError}
+                className="font-mono text-base tracking-widest text-center h-10"
               />
               {attempted && <FieldError error={codeError} />}
             </div>
+
             <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="reset-new-password">{t('auth.newPassword')}</Label>
+              <Label className="text-xs font-medium" htmlFor="reset-new-password">
+                {t('auth.newPassword')} <span className="text-destructive">*</span>
+              </Label>
               <PasswordInput
                 id="reset-new-password"
                 autoComplete="new-password"
@@ -587,23 +724,52 @@ function ForgotPasswordForm({ onBack, onAuthed }: { onBack: () => void; onAuthed
               />
               {attempted && <FieldError error={passwordError} />}
             </div>
-            {error && <p className="text-destructive text-xs">{error}</p>}
-            <Button type="submit" className="w-full" disabled={busy}>
-              {busy ? t('auth.resettingPassword') : t('auth.resetPassword')}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium" htmlFor="reset-confirm-password">
+                Confirm Password <span className="text-destructive">*</span>
+              </Label>
+              <PasswordInput
+                id="reset-confirm-password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter your new password"
+                aria-invalid={attempted && !!confirmError}
+              />
+              {attempted && <FieldError error={confirmError} />}
+            </div>
+
+            {error && (
+              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {error}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
+              {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
+              {busy ? 'Updating Password...' : 'Reset Password & Sign In'}
             </Button>
           </form>
         )}
 
         {step === 'done' && (
-          <p className="text-xs text-muted-foreground mt-1 mb-4">{t('auth.passwordReset')}</p>
+          <div className="text-center py-4 space-y-3">
+            <CheckCircle2 className="size-10 text-emerald-500 mx-auto" />
+            <p className="text-sm font-medium text-foreground">{t('auth.passwordReset')}</p>
+            <p className="text-xs text-muted-foreground">Your password has been updated successfully.</p>
+            <Button onClick={onBack} className="w-full">
+              Proceed to Sign In
+            </Button>
+          </div>
         )}
 
         <button
           type="button"
           onClick={onBack}
-          className="mt-3 w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="mt-4 w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          {t('auth.backToLogin')}
+          <ArrowLeft className="size-3.5" /> {t('auth.backToLogin')}
         </button>
       </div>
     </Centered>

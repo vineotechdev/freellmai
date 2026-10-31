@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { getDb } from '../db/index.js';
 import {
   userCount,
   createUser,
@@ -17,7 +18,13 @@ import {
 } from '../services/auth.js';
 import { signJwtToken, getTenantApiKey, validatePolarQrCode, extractQrCode } from '../services/tenant.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
-import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
+import {
+  generateResetCode,
+  resetCodeMatches,
+  clearResetCode,
+  createPasswordResetCode,
+  verifyPasswordResetCode,
+} from '../lib/reset-code.js';
 
 export const authRouter = Router();
 
@@ -521,11 +528,44 @@ authRouter.post('/change-password', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-// Forgot password: mint a reset code and log it
+// Forgot password: mint a unique per-user reset code and dispatch to user email
 const RESET_CODE_MIN_INTERVAL_MS = 10_000;
 let lastResetCodeAt = 0;
-authRouter.post('/forgot-password', (_req: Request, res: Response) => {
-  // Always respond 200 regardless of account existence to avoid user enumeration.
+
+authRouter.post('/forgot-password', async (req: Request, res: Response) => {
+  const emailInput = req.body?.email ? String(req.body.email).trim() : '';
+
+  if (emailInput) {
+    const normalized = normalizeEmail(emailInput);
+    const db = getDb();
+    const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(normalized);
+
+    // If user exists, create a unique reset code and send to their email
+    if (user) {
+      const result = await createPasswordResetCode(normalized);
+      if (!result.success) {
+        res.status(429).json({
+          error: {
+            message: result.message || 'Please wait before requesting another code.',
+            type: 'rate_limit_error',
+          },
+        });
+        return;
+      }
+    } else {
+      // Small artificial delay to prevent email enumeration timing attacks
+      await new Promise(r => setTimeout(r, 250));
+    }
+
+    res.json({
+      success: true,
+      email: normalized,
+      message: 'Password reset code has been sent to your email.',
+    });
+    return;
+  }
+
+  // Fallback for single-user mode (legacy requests with no email body)
   if (userCount() === 0) {
     res.json({ success: true });
     return;
@@ -537,35 +577,82 @@ authRouter.post('/forgot-password', (_req: Request, res: Response) => {
     return;
   }
   lastResetCodeAt = now;
-  generateResetCode(accountEmail());
-  res.json({ success: true });
+  const legacyEmail = accountEmail();
+  if (legacyEmail) {
+    await createPasswordResetCode(legacyEmail);
+  } else {
+    generateResetCode(null);
+  }
+  res.json({ success: true, email: legacyEmail });
 });
 
-// Reset password: accept the logged code + new password
+// Reset password: accept the code + user email + new password
 const resetPasswordSchema = z.object({
+  email: z.string().email('Please enter a valid email address').optional(),
   resetCode: z.string().min(1, 'Reset code is required'),
   newPassword: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
-authRouter.post('/reset-password', (req: Request, res: Response) => {
+authRouter.post('/reset-password', async (req: Request, res: Response) => {
   const parsed = resetPasswordSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
-  if (!resetCodeMatches(parsed.data.resetCode)) {
+
+  const { email, resetCode, newPassword } = parsed.data;
+
+  // 1. If email is provided, verify against the unique per-user reset code
+  if (email && email.trim()) {
+    const verification = await verifyPasswordResetCode(email, resetCode);
+    if (!verification.valid) {
+      res.status(403).json({
+        error: {
+          message: verification.error || 'Invalid or expired reset code',
+          type: 'authentication_error',
+        },
+      });
+      return;
+    }
+
+    const user = resetUserPassword(newPassword, email);
+    if (!user) {
+      res.status(404).json({ error: { message: 'No account found for this email address', type: 'not_found' } });
+      return;
+    }
+
+    const token = createSession(user.userId);
+    const jwtToken = signJwtToken({
+      userId: user.userId,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+    });
+    const tenantApiKey = getTenantApiKey(user.motherId, user.companyName);
+
+    res.json({
+      success: true,
+      token,
+      jwtToken,
+      apiKey: tenantApiKey,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+    });
+    return;
+  }
+
+  // 2. Legacy fallback if no email was passed
+  if (!resetCodeMatches(resetCode)) {
     res.status(403).json({ error: { message: 'Invalid or expired reset code', type: 'authentication_error' } });
     return;
   }
-  const user = resetUserPassword(parsed.data.newPassword);
+  const user = resetUserPassword(newPassword);
   if (!user) {
     res.status(404).json({ error: { message: 'No account found', type: 'not_found' } });
     return;
   }
   clearResetCode();
-  // Sign the operator straight in: the code already proved they control the
-  // install, and sending them back to a login form that needs an email they
-  // may not remember left them locked out after a successful reset (#1477).
   const token = createSession(user.userId);
   res.json({ success: true, token, email: user.email });
 });
