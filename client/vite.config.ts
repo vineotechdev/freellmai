@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        '@freellmapi/shared/types.js': path.resolve(__dirname, '../shared/types.ts'),
+        '@freellmapi/shared/types': path.resolve(__dirname, '../shared/types.ts'),
+        '@freellmapi/shared': path.resolve(__dirname, '../shared/types.ts'),
       },
     },
     server: {

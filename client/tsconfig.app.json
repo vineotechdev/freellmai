@@ -22,7 +22,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@freellmapi/shared": ["../shared/types.ts"],
+      "@freellmapi/shared/types": ["../shared/types.ts"],
+      "@freellmapi/shared/types.js": ["../shared/types.ts"],
+      "@freellmapi/shared/*": ["../shared/*"]
     }
   },
   "include": ["src"]
