@@ -1,6 +1,6 @@
 import './env.js';
 import { createApp } from './app.js';
-import { initDb, getDb } from './db/index.js';
+import { initDb, getDb, initPostgres } from './db/index.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
 import { restoreProxySettings, flushProxyCache } from './lib/proxy.js';
 import { startWakeDetect } from './lib/wake-detect.js';
@@ -45,7 +45,8 @@ async function main() {
   } else {
     await restoreDbBackupIfNeeded();
   }
-  initDb(config.dbPath ?? undefined);
+  const db = initDb(config.dbPath ?? undefined);
+  await initPostgres(db);
   applyDeclarativeConfigFromEnv();
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();

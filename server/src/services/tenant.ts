@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { timingSafeStringEqual } from '../lib/system-prompt.js';
 import { LLMAI_CONSTANTS } from '../constants/llmai_constant.js';
+import { persistTenantKeyToPostgres } from '../db/postgres.js';
 
 export interface PolarQrValidationResult {
   valid: boolean;
@@ -127,6 +128,8 @@ export function getTenantApiKey(motherId: string, companyName: string = 'Default
     ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key
   `).run(normId, generatedKey, companyName.trim());
 
+  void persistTenantKeyToPostgres({ mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
+
   return generatedKey;
 }
 
@@ -142,6 +145,8 @@ export function regenerateTenantApiKey(motherId: string, companyName: string = '
     VALUES (?, ?, ?)
     ON CONFLICT(mother_id) DO UPDATE SET api_key = excluded.api_key, company_name = excluded.company_name
   `).run(normId, generatedKey, companyName.trim());
+
+  void persistTenantKeyToPostgres({ mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
 
   return generatedKey;
 }

@@ -189,8 +189,19 @@ export function createApp(config?: Config) {
   });
   app.use(cors({
     origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-      callback(null, !origin || allowedCorsOrigins.has(origin));
+      if (
+        !origin ||
+        allowedCorsOrigins.has('*') ||
+        allowedCorsOrigins.has(origin) ||
+        process.env.CORS_ORIGIN === '*' ||
+        process.env.CORS_ALLOW_ALL === 'true'
+      ) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
     },
+    credentials: true,
   }));
   // Two-tier JSON body limits. The LLM wire surfaces carry vision payloads —
   // base64 images inline in the body (~33% inflation; google.ts forwards

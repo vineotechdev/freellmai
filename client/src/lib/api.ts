@@ -1,4 +1,7 @@
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+import { BACKEND_URL, getApiUrl, getBackendBaseUrl } from '@/llmai_constant';
+
+export { BACKEND_URL, getApiUrl, getBackendBaseUrl };
+
 const TOKEN_KEY = 'freellmapi_dashboard_token';
 
 // Dashboard session token (#35). Stored in localStorage; sent as a Bearer on
@@ -32,7 +35,8 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const res = await fetch(`${BASE}${path}`, {
+  const url = getApiUrl(path);
+  const res = await fetch(url, {
     // `...options` first so an explicit method/body/signal applies, but headers
     // are merged last — otherwise an options.headers would clobber the
     // Content-Type and Authorization we set here.
@@ -75,8 +79,9 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     return JSON.parse(text) as T;
   } catch {
     throw new Error(
-      `Expected JSON from ${path} but got a non-JSON response. The API isn't reachable at this origin — ` +
-      `make sure the backend is running and that /api is forwarded to it, not served as the dashboard's static files.`,
+      `Expected JSON from ${url} but got a non-JSON response. ` +
+      `Make sure the backend is running and reachable at ${getBackendBaseUrl() || 'the current origin'}, ` +
+      `and that /api is forwarded to it.`,
     );
   }
 }

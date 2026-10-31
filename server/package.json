@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@freellmapi/shared": "*",
+    "@types/pg": "^8.23.1",
     "ajv": "^8.20.0",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
@@ -30,6 +31,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
+    "pg": "^8.23.1",
     "sharp": "^0.35.3",
     "socks-proxy-agent": "^10.0.0",
     "undici": "^6.21.0",

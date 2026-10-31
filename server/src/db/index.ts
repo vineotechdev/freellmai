@@ -222,6 +222,19 @@ export function initDb(
   return db;
 }
 
+export {
+  initPostgres,
+  isPostgresConfigured,
+  getPostgresPool,
+  persistUserToPostgres,
+  persistTenantKeyToPostgres,
+  persistApiKeyToPostgres,
+  persistSettingToPostgres,
+  syncAllTablesToPostgres,
+  syncAllTablesFromPostgres,
+} from './postgres.js';
+import { persistSettingToPostgres } from './postgres.js';
+
 export function getUnifiedApiKey(): string {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key = 'unified_api_key'").get() as { value: string };
@@ -232,6 +245,7 @@ export function regenerateUnifiedKey(): string {
   const db = getDb();
   const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
   db.prepare("UPDATE settings SET value = ? WHERE key = 'unified_api_key'").run(key);
+  void persistSettingToPostgres('unified_api_key', key);
   return key;
 }
 
@@ -248,4 +262,5 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value);
+  void persistSettingToPostgres(key, value);
 }

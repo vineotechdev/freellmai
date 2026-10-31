@@ -4,6 +4,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import { getDb } from '../db/index.js';
+import { persistApiKeyToPostgres } from '../db/postgres.js';
 import { resolveProvider, getAllProviders } from '../providers/index.js';
 import { OpenAICompatProvider, isAnonymousCredential } from '../providers/openai-compat.js';
 import { getSyncState } from '../services/catalog-sync.js';
@@ -231,6 +232,7 @@ function insertImportedKey(platform: (typeof PLATFORMS)[number], keyName: string
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id)
     VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?)
   `).run(platform, keyName, encrypted, iv, authTag, motherId);
+  void persistApiKeyToPostgres({ platform, label: keyName, encrypted_key: encrypted, iv, auth_tag: authTag, status: 'unknown', enabled: 1, mother_id: motherId });
 }
 
 // Count enabled catalog models for a platform. Used to warn when a key is
@@ -813,6 +815,8 @@ keysRouter.post('/', (req: Request, res: Response) => {
     INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id)
     VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?)
   `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId);
+
+  void persistApiKeyToPostgres({ platform, label: label ?? '', encrypted_key: encrypted, iv, auth_tag: authTag, status: 'unknown', enabled: 1, mother_id: motherId });
 
   // #1348: fetch the provider's models in the background when the catalog
   // carries none for it. No-op for every other platform.

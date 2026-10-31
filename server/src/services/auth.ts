@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { getJwtSecret, getTenantApiKey, normalizeMotherId } from './tenant.js';
+import { persistUserToPostgres } from '../db/postgres.js';
 
 // Dashboard authentication: email + password accounts with JWT & session
 // tokens. Multi-tenant support with mother_id and company_name.
@@ -79,17 +80,21 @@ export function createUser(inputOrEmail: CreateUserInput | string, legacyPasswor
   } catch {}
 
   let result;
+  const passHash = hashPassword(password);
   try {
     result = db.prepare('INSERT INTO users (mother_id, company_name, qr_code, email, password_hash) VALUES (?, ?, ?, ?, ?)')
-      .run(motherId, companyName, qrCode, normalized, hashPassword(password));
+      .run(motherId, companyName, qrCode, normalized, passHash);
   } catch {
     result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
-      .run(motherId, companyName, normalized, hashPassword(password));
+      .run(motherId, companyName, normalized, passHash);
   }
 
   const userId = Number(result.lastInsertRowid);
   // Ensure tenant API key exists
   getTenantApiKey(motherId, companyName);
+
+  // Persist user to PostgreSQL
+  void persistUserToPostgres({ email: normalized, password_hash: passHash, mother_id: motherId, company_name: companyName });
 
   return { userId, email: normalized, motherId, companyName, qrCode };
 }

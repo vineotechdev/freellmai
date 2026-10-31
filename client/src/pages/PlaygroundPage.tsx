@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, CircleAlert, FileText, Globe, X } from 'lucide-react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, getApiUrl } from '@/lib/api'
 import { buildModelOptions } from '@/lib/model-groups'
 import type { Chain } from '@/components/chain-manager'
 import { Markdown } from '@/components/markdown'
@@ -843,7 +843,6 @@ export default function PlaygroundPage() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
-      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 
       // Web search first, when it is on and there is a question to look up. A
       // failed search is reported and the question is answered without it.
@@ -852,7 +851,7 @@ export default function PlaygroundPage() {
       if (webSearchOn && text) {
         const searchStart = Date.now()
         try {
-          const res = await fetch(`${base}/v1/search`, {
+          const res = await fetch(getApiUrl('/v1/search'), {
             method: 'POST',
             headers,
             body: JSON.stringify({ query: text, max_results: 5 }),
@@ -899,7 +898,7 @@ export default function PlaygroundPage() {
       abortRef.current = controller
 
       const start = Date.now()
-      const res = await fetch(`${base}/v1/chat/completions`, {
+      const res = await fetch(getApiUrl('/v1/chat/completions'), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),

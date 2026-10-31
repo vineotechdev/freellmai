@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { FieldError } from '@/components/ui/field-error'
 import { useI18n } from '@/i18n'
-import { apiFetch, getToken } from '@/lib/api'
+import { apiFetch, getToken, getApiUrl } from '@/lib/api'
 import { toast } from '@/lib/toast'
 import type { ApiKey } from '../../../../shared/types'
 
@@ -22,8 +22,6 @@ const FORMAT_OPTIONS: { value: ExportFormat; label: string; ext: string }[] = [
   { value: 'env', label: '.env', ext: 'env' },
   { value: 'csv', label: 'CSV', ext: 'csv' },
 ]
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 // #786: the desktop build has no user-set password to re-enter, and its server
 // skips re-auth for local requests, so the password step is skipped here too.
@@ -39,7 +37,7 @@ async function downloadExport(format: ExportFormat, healthyOnly: boolean, passwo
   const headers: Record<string, string> = {}
   if (token) headers.Authorization = `Bearer ${token}`
   if (password) headers['x-reauth-password'] = password
-  const res = await fetch(`${BASE}/api/keys/export?${params}`, { headers })
+  const res = await fetch(getApiUrl(`/api/keys/export?${params}`), { headers })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: { message: res.statusText } }))
     throw new Error(body.error?.message ?? `HTTP ${res.status}`)
