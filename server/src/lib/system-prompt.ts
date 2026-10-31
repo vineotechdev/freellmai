@@ -62,13 +62,18 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   // 1. Tenant unified API key or JWT token
   const tenant = resolveTenantFromApiKey(trimmed);
   if (tenant) {
-    return { kind: 'unified', systemPrompt: null, motherId: tenant.motherId, companyName: tenant.companyName };
+    const res: ResolvedAuth = { kind: 'unified', systemPrompt: null, motherId: tenant.motherId, companyName: tenant.companyName };
+    Object.defineProperty(res, 'motherId', { value: tenant.motherId, enumerable: false, writable: true, configurable: true });
+    Object.defineProperty(res, 'companyName', { value: tenant.companyName, enumerable: false, writable: true, configurable: true });
+    return res;
   }
 
   // 2. Global unified key fallback
   try {
     if (timingSafeStringEqual(trimmed, getUnifiedApiKey())) {
-      return { kind: 'unified', systemPrompt: null, motherId: 'default' };
+      const res: ResolvedAuth = { kind: 'unified', systemPrompt: null, motherId: 'default' };
+      Object.defineProperty(res, 'motherId', { value: 'default', enumerable: false, writable: true, configurable: true });
+      return res;
     }
   } catch {}
 

@@ -16,7 +16,7 @@ import {
   normalizeEmail,
   desktopSessionToken,
 } from '../services/auth.js';
-import { signJwtToken, getTenantApiKey, validatePolarQrCode, extractQrCode } from '../services/tenant.js';
+import { signJwtToken, getTenantApiKey, validatePolarQrCode } from '../services/tenant.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import {
   generateResetCode,
@@ -325,8 +325,8 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
             email: parsedReg.data.email,
             password: parsedReg.data.password,
           });
-          createSession(user.userId);
-          const token = signJwtToken({
+          const sessionToken = createSession(user.userId);
+          const jwtToken = signJwtToken({
             userId: user.userId,
             email: user.email,
             motherId: user.motherId,
@@ -334,7 +334,8 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
           });
           const apiKey = getTenantApiKey(user.motherId, user.companyName);
           res.status(201).json({
-            token,
+            token: sessionToken,
+            jwtToken,
             email: user.email,
             motherId: user.motherId,
             companyName: user.companyName,
@@ -375,8 +376,8 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
     companyName: parsed.data.companyName,
   });
   clearSetupCode();
-  createSession(user.userId);
-  const token = signJwtToken({
+  const sessionToken = createSession(user.userId);
+  const jwtToken = signJwtToken({
     userId: user.userId,
     email: user.email,
     motherId: user.motherId,
@@ -384,7 +385,8 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
   });
   const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.status(201).json({
-    token,
+    token: sessionToken,
+    jwtToken,
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
@@ -414,8 +416,8 @@ authRouter.post('/login', (req: Request, res: Response) => {
   }
 
   clearFailures(email);
-  createSession(user.userId);
-  const token = signJwtToken({
+  const sessionToken = createSession(user.userId);
+  const jwtToken = signJwtToken({
     userId: user.userId,
     email: user.email,
     motherId: user.motherId,
@@ -423,7 +425,8 @@ authRouter.post('/login', (req: Request, res: Response) => {
   });
   const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.json({
-    token,
+    token: sessionToken,
+    jwtToken,
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
@@ -578,12 +581,11 @@ authRouter.post('/forgot-password', async (req: Request, res: Response) => {
   }
   lastResetCodeAt = now;
   const legacyEmail = accountEmail();
+  generateResetCode(legacyEmail);
   if (legacyEmail) {
-    await createPasswordResetCode(legacyEmail);
-  } else {
-    generateResetCode(null);
+    void createPasswordResetCode(legacyEmail);
   }
-  res.json({ success: true, email: legacyEmail });
+  res.json({ success: true });
 });
 
 // Reset password: accept the code + user email + new password
@@ -644,7 +646,7 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
 
   // 2. Legacy fallback if no email was passed
   if (!resetCodeMatches(resetCode)) {
-    res.status(403).json({ error: { message: 'Invalid or expired reset code', type: 'authentication_error' } });
+    res.status(403).json({ error: { message: 'Reset code is incorrect or has expired. Request a new one.', type: 'invalid_reset_code' } });
     return;
   }
   const user = resetUserPassword(newPassword);

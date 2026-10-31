@@ -1,6 +1,5 @@
 import pg from 'pg';
 import fs from 'fs';
-import path from 'path';
 import type { Db } from './types.js';
 
 const { Pool } = pg;
@@ -176,24 +175,7 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
   if (!p || !isInitialized) return;
 
   try {
-    // 1. Check if snapshot exists and if local db is empty
-    const userCountRow = db.prepare('SELECT count(*) as count FROM users').get() as { count: number } | undefined;
-    const isDbEmpty = !userCountRow || userCountRow.count === 0;
-
-    if (isDbEmpty && db.name && db.name !== ':memory:') {
-      const snapRes = await p.query('SELECT data FROM freellmai_snapshots WHERE id = $1', ['latest']);
-      if (snapRes.rows.length > 0 && snapRes.rows[0].data) {
-        try {
-          const dbPath = db.name;
-          fs.writeFileSync(dbPath, snapRes.rows[0].data);
-          console.log(`[PostgreSQL] Restored database snapshot from PostgreSQL to ${dbPath}`);
-        } catch (snapErr: any) {
-          console.warn('[PostgreSQL] Could not restore snapshot directly:', snapErr.message);
-        }
-      }
-    }
-
-    // 2. Sync settings from PostgreSQL
+    // 1. Sync settings from PostgreSQL
     const settingsRes = await p.query('SELECT key, value FROM settings');
     for (const row of settingsRes.rows) {
       db.prepare(`
@@ -202,9 +184,10 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
       `).run(row.key, row.value);
     }
 
-    // 3. Sync users from PostgreSQL
+    // 2. Sync users from PostgreSQL
     const usersRes = await p.query('SELECT email, password_hash, mother_id, company_name, created_at FROM users');
     for (const row of usersRes.rows) {
+      const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       db.prepare(`
         INSERT INTO users (email, password_hash, mother_id, company_name, created_at)
         VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
@@ -212,30 +195,32 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
           password_hash = excluded.password_hash,
           mother_id = excluded.mother_id,
           company_name = excluded.company_name
-      `).run(row.email, row.password_hash, row.mother_id, row.company_name, row.created_at);
+      `).run(row.email, row.password_hash, row.mother_id || 'default', row.company_name || 'Default Company', createdAtStr);
     }
 
-    // 4. Sync tenant_api_keys from PostgreSQL
+    // 3. Sync tenant_api_keys from PostgreSQL
     const tenantRes = await p.query('SELECT mother_id, api_key, company_name, created_at FROM tenant_api_keys');
     for (const row of tenantRes.rows) {
+      const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       db.prepare(`
         INSERT INTO tenant_api_keys (mother_id, api_key, company_name, created_at)
         VALUES (?, ?, ?, COALESCE(?, datetime('now')))
         ON CONFLICT(mother_id) DO UPDATE SET
           api_key = excluded.api_key,
           company_name = excluded.company_name
-      `).run(row.mother_id, row.api_key, row.company_name, row.created_at);
+      `).run(row.mother_id, row.api_key, row.company_name || 'Default Company', createdAtStr);
     }
 
-    // 5. Sync api_keys from PostgreSQL
+    // 4. Sync api_keys from PostgreSQL
     const keysRes = await p.query('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, created_at FROM api_keys');
     for (const row of keysRes.rows) {
       const existing = db.prepare('SELECT id FROM api_keys WHERE platform = ? AND encrypted_key = ?').get(row.platform, row.encrypted_key);
+      const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       if (!existing) {
         db.prepare(`
           INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id, row.created_at);
+        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', createdAtStr);
       }
     }
 

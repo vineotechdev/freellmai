@@ -10,10 +10,7 @@ const RESET_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const MIN_REQUEST_INTERVAL_MS = 30 * 1000; // 30 seconds rate-limit per email
 let legacyMintedAtMs = 0;
 
-let tableInitialized = false;
-
 function ensureResetTable(): void {
-  if (tableInitialized) return;
   try {
     const db = getDb();
     db.exec(`
@@ -27,7 +24,6 @@ function ensureResetTable(): void {
       );
       CREATE INDEX IF NOT EXISTS idx_reset_codes_email ON password_reset_codes(email);
     `);
-    tableInitialized = true;
   } catch (err: any) {
     console.warn('[ResetCode] Could not ensure password_reset_codes table:', err.message);
   }

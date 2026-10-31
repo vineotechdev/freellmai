@@ -1589,12 +1589,18 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   }
   const provider = getProvider(entry.platform as Platform)!;
 
-  let allKeys: KeyRow[];
-  if (motherId && motherId !== 'all') {
+  let allKeys: KeyRow[] = [];
+  if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     allKeys = db.prepare(
-      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND mother_id = ?"
+      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
     ).all(entry.platform, motherId) as KeyRow[];
-  } else {
+  }
+  if (allKeys.length === 0) {
+    allKeys = db.prepare(
+      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '')"
+    ).all(entry.platform) as KeyRow[];
+  }
+  if (allKeys.length === 0) {
     allKeys = db.prepare(
       "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
     ).all(entry.platform) as KeyRow[];
