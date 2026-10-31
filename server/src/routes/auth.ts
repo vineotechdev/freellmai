@@ -334,8 +334,9 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
           });
           const apiKey = getTenantApiKey(user.motherId, user.companyName);
           res.status(201).json({
-            token: sessionToken,
+            token: jwtToken,
             jwtToken,
+            sessionToken,
             email: user.email,
             motherId: user.motherId,
             companyName: user.companyName,
@@ -385,8 +386,9 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
   });
   const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.status(201).json({
-    token: sessionToken,
+    token: jwtToken,
     jwtToken,
+    sessionToken,
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
@@ -425,8 +427,9 @@ authRouter.post('/login', (req: Request, res: Response) => {
   });
   const apiKey = getTenantApiKey(user.motherId, user.companyName);
   res.json({
-    token: sessionToken,
+    token: jwtToken,
     jwtToken,
+    sessionToken,
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,

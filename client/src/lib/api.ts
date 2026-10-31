@@ -32,7 +32,8 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (token) {
+  const isAuthEndpoint = path.startsWith('/api/auth/login') || path.startsWith('/api/auth/register') || path.startsWith('/api/auth/setup') || path.startsWith('/api/auth/forgot-password');
+  if (token && !isAuthEndpoint) {
     headers.set('Authorization', `Bearer ${token}`);
   }
   const url = getApiUrl(path);

@@ -94,18 +94,16 @@ export function normalizeMotherId(id: string): string {
 }
 
 export function getJwtSecret(): string {
-  const envSecret = process.env.JWT_SECRET;
+  const envSecret = process.env.JWT_SECRET || process.env.ENCRYPTION_KEY;
   if (envSecret && envSecret.trim().length > 0) return envSecret.trim();
   const db = getDb();
   try {
     const row = db.prepare("SELECT value FROM settings WHERE key = 'jwt_secret'").get() as { value: string } | undefined;
     if (row && row.value) return row.value;
-    const newSecret = crypto.randomBytes(32).toString('hex');
-    db.prepare("INSERT INTO settings (key, value) VALUES ('jwt_secret', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(newSecret);
-    return newSecret;
   } catch {
-    return 'polarlist_freellmapi_jwt_secret_fallback_key';
+    // ignore
   }
+  return 'polarlist_freellmapi_jwt_secret_token_secure_key_2026';
 }
 
 export function signJwtToken(payload: { userId: number; email: string; motherId: string; companyName: string }): string {

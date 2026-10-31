@@ -146,8 +146,20 @@ export function createSession(userId: number): string {
 export function validateSession(token: string | undefined | null): SessionUser | null {
   if (!token) return null;
   const trimmed = token.trim();
+  const db = getDb();
+  const tokenHash = sha256(trimmed);
 
-  // 1. JWT verification
+  // Check if token was explicitly revoked / logged out
+  try {
+    const revoked = db.prepare('SELECT user_id, expires_at_ms FROM sessions WHERE token_hash = ?').get(tokenHash) as { user_id: number; expires_at_ms: number } | undefined;
+    if (revoked && (revoked.user_id === -1 || revoked.expires_at_ms <= Date.now())) {
+      return null;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 1. JWT verification (stateless for serverless multi-instance support)
   if (trimmed.split('.').length === 3) {
     try {
       const decoded = jwt.verify(trimmed, getJwtSecret()) as {
@@ -156,17 +168,20 @@ export function validateSession(token: string | undefined | null): SessionUser |
         motherId?: string;
         companyName?: string;
       };
-      if (decoded && decoded.userId) {
-        const user = getDb().prepare('SELECT id, email, mother_id, company_name FROM users WHERE id = ?')
-          .get(decoded.userId) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
-        if (user) {
-          return {
-            userId: user.id,
-            email: user.email,
-            motherId: user.mother_id || decoded.motherId || 'default',
-            companyName: user.company_name || decoded.companyName || 'Default Company',
-          };
+      if (decoded && decoded.email) {
+        let user: { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+        try {
+          user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?')
+            .get(decoded.email) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+        } catch {
+          // ignore
         }
+        return {
+          userId: user ? user.id : (decoded.userId || 1),
+          email: decoded.email,
+          motherId: (user && user.mother_id) || decoded.motherId || 'default',
+          companyName: (user && user.company_name) || decoded.companyName || 'Default Company',
+        };
       }
     } catch {
       // invalid or expired jwt, proceed to session check
@@ -174,28 +189,44 @@ export function validateSession(token: string | undefined | null): SessionUser |
   }
 
   // 2. Legacy session token check
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT s.user_id, s.expires_at_ms, u.email, u.mother_id, u.company_name
-    FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ?
-  `).get(sha256(trimmed)) as { user_id: number; expires_at_ms: number; email: string; mother_id?: string; company_name?: string } | undefined;
-  if (!row) return null;
-  if (row.expires_at_ms < Date.now()) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(trimmed));
+  try {
+    const row = db.prepare(`
+      SELECT s.user_id, s.expires_at_ms, u.email, u.mother_id, u.company_name
+      FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ?
+    `).get(tokenHash) as { user_id: number; expires_at_ms: number; email: string; mother_id?: string; company_name?: string } | undefined;
+    if (!row) return null;
+    if (row.expires_at_ms < Date.now()) {
+      db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+      return null;
+    }
+    return {
+      userId: row.user_id,
+      email: row.email,
+      motherId: row.mother_id || 'default',
+      companyName: row.company_name || 'Default Company',
+    };
+  } catch {
     return null;
   }
-  return {
-    userId: row.user_id,
-    email: row.email,
-    motherId: row.mother_id || 'default',
-    companyName: row.company_name || 'Default Company',
-  };
 }
 
 export function deleteSession(token: string | undefined | null): void {
   if (!token) return;
-  getDb().prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
+  const db = getDb();
+  const tokenHash = sha256(token.trim());
+  try {
+    const defaultUser = db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number } | undefined;
+    if (defaultUser) {
+      db.prepare(`
+        INSERT INTO sessions (token_hash, user_id, expires_at_ms)
+        VALUES (?, ?, 0)
+        ON CONFLICT(token_hash) DO UPDATE SET expires_at_ms = 0
+      `).run(tokenHash, defaultUser.id);
+    }
+  } catch {
+    // ignore
+  }
 }
 
 /** Update the email of the authenticated user after verifying the current password. Throws { code: 'email_taken' } on conflict. */

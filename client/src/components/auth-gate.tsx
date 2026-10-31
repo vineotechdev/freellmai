@@ -220,11 +220,11 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       if (setupCode) payload.setupCode = setupCode.trim()
 
       const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
-      const res = await apiFetch<{ token: string }>(endpoint, {
+      const res = await apiFetch<{ token: string; jwtToken?: string }>(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      setToken(res.token)
+      setToken(res.jwtToken || res.token)
       onAuthed()
     } catch (err) {
       if ((err as ApiError).code === 'setup_code_required') {
