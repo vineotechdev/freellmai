@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { resolveTenantFromApiKey } from '../services/tenant.js';
 
 // Per-client API keys with server-enforced system prompts (#411). A client
 // profile is a second kind of inference credential: it authenticates ONLY the
@@ -37,14 +38,15 @@ export function hashClientProfileKey(key: string): string {
 }
 
 export type ResolvedAuth =
-  | { kind: 'unified'; systemPrompt: null }
-  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null };
+  | { kind: 'unified'; systemPrompt: null; motherId: string; companyName?: string }
+  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null; motherId: string };
 
 interface ProfileRow {
   id: number;
   name: string;
   system_prompt: string | null;
   enabled: number;
+  mother_id?: string;
 }
 
 /**
@@ -55,18 +57,31 @@ interface ProfileRow {
  */
 export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   if (!token) return null;
-  if (timingSafeStringEqual(token, getUnifiedApiKey())) {
-    return { kind: 'unified', systemPrompt: null };
+  const trimmed = token.trim();
+
+  // 1. Tenant unified API key or JWT token
+  const tenant = resolveTenantFromApiKey(trimmed);
+  if (tenant) {
+    return { kind: 'unified', systemPrompt: null, motherId: tenant.motherId, companyName: tenant.companyName };
   }
-  if (!token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return null;
+
+  // 2. Global unified key fallback
+  try {
+    if (timingSafeStringEqual(trimmed, getUnifiedApiKey())) {
+      return { kind: 'unified', systemPrompt: null, motherId: 'default' };
+    }
+  } catch {}
+
+  // 3. Client profile key
+  if (!trimmed.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return null;
   const row = getDb().prepare(
-    'SELECT id, name, system_prompt, enabled FROM client_profiles WHERE token_hash = ?',
-  ).get(hashClientProfileKey(token)) as ProfileRow | undefined;
+    'SELECT id, name, system_prompt, enabled, mother_id FROM client_profiles WHERE token_hash = ?',
+  ).get(hashClientProfileKey(trimmed)) as ProfileRow | undefined;
   if (!row || !row.enabled) return null;
   const prompt = row.system_prompt != null && row.system_prompt.trim().length > 0
     ? row.system_prompt
     : null;
-  return { kind: 'profile', profileId: row.id, name: row.name, systemPrompt: prompt };
+  return { kind: 'profile', profileId: row.id, name: row.name, systemPrompt: prompt, motherId: row.mother_id || 'default' };
 }
 
 /**

@@ -217,7 +217,7 @@ function splitRawKey(rawKey: string) {
   };
 }
 
-function insertImportedKey(platform: (typeof PLATFORMS)[number], keyName: string, keyValue: string) {
+function insertImportedKey(platform: (typeof PLATFORMS)[number], keyName: string, keyValue: string, motherId: string = 'default') {
   if (platform === 'custom') {
     throw new Error('Custom providers must be added with a base URL');
   }
@@ -228,9 +228,9 @@ function insertImportedKey(platform: (typeof PLATFORMS)[number], keyName: string
   const db = getDb();
   const { encrypted, iv, authTag } = encrypt(keyValue.trim());
   db.prepare(`
-    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled)
-    VALUES (?, ?, ?, ?, ?, 'unknown', 1)
-  `).run(platform, keyName, encrypted, iv, authTag);
+    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id)
+    VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?)
+  `).run(platform, keyName, encrypted, iv, authTag, motherId);
 }
 
 // Count enabled catalog models for a platform. Used to warn when a key is
@@ -330,16 +330,18 @@ function noModelsNotice(platform: string): string | undefined {
 // missing without enumerating the whole list by hand. `custom` is excluded —
 // it's a per-key user-defined placeholder, not a fixed free-tier provider to
 // "check off".
-keysRouter.get('/providers', (_req: Request, res: Response) => {
+keysRouter.get('/providers', (req: Request, res: Response) => {
   const db = getDb();
+  const motherId = (req as any).user?.motherId || 'default';
   const countRows = db.prepare(`
     SELECT
       platform,
       COUNT(*) AS total_keys,
       SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled_keys
     FROM api_keys
+    WHERE mother_id = ?
     GROUP BY platform
-  `).all() as Array<{ platform: string; total_keys: number; enabled_keys: number }>;
+  `).all(motherId) as Array<{ platform: string; total_keys: number; enabled_keys: number }>;
   const countsByPlatform = new Map(countRows.map(r => [r.platform, r]));
 
   const providers = getAllProviders()
@@ -373,10 +375,11 @@ keysRouter.get('/providers', (_req: Request, res: Response) => {
   });
 });
 
-// List all keys (masked)
-keysRouter.get('/', (_req: Request, res: Response) => {
+// List all keys (masked) for this tenant
+keysRouter.get('/', (req: Request, res: Response) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM api_keys ORDER BY created_at DESC').all() as any[];
+  const motherId = (req as any).user?.motherId || 'default';
+  const rows = db.prepare('SELECT * FROM api_keys WHERE mother_id = ? ORDER BY created_at DESC').all(motherId) as any[];
   const modelCounts = new Map<string, number>();
   const modelCountFor = (platform: string): number => {
     if (!modelCounts.has(platform)) modelCounts.set(platform, enabledModelCount(platform));
@@ -533,7 +536,8 @@ keysRouter.delete('/:id/cooldowns', (req: Request, res: Response) => {
   }
 
   const db = getDb();
-  const exists = db.prepare('SELECT 1 FROM api_keys WHERE id = ?').get(id);
+  const motherId = (req as any).user?.motherId || 'default';
+  const exists = db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ?').get(id, motherId);
   if (!exists) {
     res.status(404).json({ error: 'Key not found' });
     return;
@@ -582,13 +586,15 @@ keysRouter.get('/export', (req: Request, res: Response) => {
   const db = getDb();
   const format = (req.query.format as string) ?? 'json';
   const healthyOnly = req.query.healthy === 'true';
+  const motherId = user?.motherId || 'default';
 
-  let whereClause = '';
+  let whereClause = 'WHERE mother_id = ?';
+  const params: any[] = [motherId];
   if (healthyOnly) {
-    whereClause = "WHERE status = 'healthy'";
+    whereClause += " AND status = 'healthy'";
   }
 
-  const rows = db.prepare(`SELECT * FROM api_keys ${whereClause} ORDER BY platform, created_at ASC`).all() as any[];
+  const rows = db.prepare(`SELECT * FROM api_keys ${whereClause} ORDER BY platform, created_at ASC`).all(...params) as any[];
 
   // Decrypt and filter — only export keys with a real value
   const decryptedKeys = rows
@@ -710,8 +716,9 @@ keysRouter.post('/:id/reveal', (req: Request, res: Response) => {
     return;
   }
 
-  const row = getDb().prepare('SELECT encrypted_key, iv, auth_tag FROM api_keys WHERE id = ?')
-    .get(id) as { encrypted_key: string; iv: string; auth_tag: string } | undefined;
+  const motherId = user?.motherId || 'default';
+  const row = getDb().prepare('SELECT encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND mother_id = ?')
+    .get(id, motherId) as { encrypted_key: string; iv: string; auth_tag: string } | undefined;
   if (!row) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -750,10 +757,11 @@ keysRouter.post('/', (req: Request, res: Response) => {
   const proxyUrl = parsed.data.proxyUrl?.trim() ?? '';
 
   const db = getDb();
+  const motherId = (req as any).user?.motherId || 'default';
 
   if (isKeyless) {
-    const rows = db.prepare('SELECT id, encrypted_key, iv, auth_tag FROM api_keys WHERE platform = ? ORDER BY id')
-      .all(platform) as { id: number; encrypted_key: string; iv: string; auth_tag: string }[];
+    const rows = db.prepare('SELECT id, encrypted_key, iv, auth_tag FROM api_keys WHERE platform = ? AND mother_id = ? ORDER BY id')
+      .all(platform, motherId) as { id: number; encrypted_key: string; iv: string; auth_tag: string }[];
     const plaintext = (r: typeof rows[number]): string | null => {
       try { return decrypt(r.encrypted_key, r.iv, r.auth_tag); } catch { return null; }
     };
@@ -802,9 +810,9 @@ keysRouter.post('/', (req: Request, res: Response) => {
   // `user:pass@` credentials. Absent/'' stores NULLs = no override.
   const proxy = encryptProxyUrl(proxyUrl);
   const result = db.prepare(`
-    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag)
-    VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?)
-  `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag);
+    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id)
+    VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?)
+  `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId);
 
   // #1348: fetch the provider's models in the background when the catalog
   // carries none for it. No-op for every other platform.
@@ -1575,7 +1583,8 @@ keysRouter.post('/import', (req: Request, res: Response, next: NextFunction) => 
         }
 
         try {
-          insertImportedKey(platformParse.data, keyName, keyValue);
+          const motherId = (req as any).user?.motherId || 'default';
+          insertImportedKey(platformParse.data, keyName, keyValue, motherId);
           imported.push({ keyName, platform: platformParse.data });
         } catch (insertErr) {
           errors.push({ key: keyName, error: (insertErr as Error).message });
@@ -1729,7 +1738,8 @@ keysRouter.post('/import-selected', async (req: Request, res: Response) => {
     }
 
     try {
-      insertImportedKey(key.platform, keyName, key.keyValue);
+      const motherId = (req as any).user?.motherId || 'default';
+      insertImportedKey(key.platform, keyName, key.keyValue, motherId);
       imported++;
       existingKeys.add(key.keyValue.trim());
     } catch (err) {
@@ -1755,7 +1765,8 @@ keysRouter.delete('/:id', (req: Request, res: Response) => {
   }
 
   const db = getDb();
-  const row = db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ?').get(id) as { platform: string; base_url: string | null } | undefined;
+  const motherId = (req as any).user?.motherId || 'default';
+  const row = db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND mother_id = ?').get(id, motherId) as { platform: string; base_url: string | null } | undefined;
   if (!row) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -1769,11 +1780,11 @@ keysRouter.delete('/:id', (req: Request, res: Response) => {
       for (const table of ['models', 'embedding_models', 'media_models']) {
         db.prepare(`UPDATE ${table} SET key_id = ? WHERE platform = 'custom' AND key_id = ?`).run(sibling, id);
       }
-      db.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+      db.prepare('DELETE FROM api_keys WHERE id = ? AND mother_id = ?').run(id, motherId);
       return;
     }
 
-    db.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+    db.prepare('DELETE FROM api_keys WHERE id = ? AND mother_id = ?').run(id, motherId);
     // Custom models exist only because POST /custom registered them alongside
     // their endpoint key (#117) — they can't route without it. Cascade away
     // the models bound to THIS endpoint (#212); other custom providers keep
@@ -1865,6 +1876,14 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     return;
   }
 
+  const motherId = (req as any).user?.motherId || 'default';
+  const db = getDb();
+  const existingKey = db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ?').get(id, motherId);
+  if (!existingKey) {
+    res.status(404).json({ error: { message: 'Key not found' } });
+    return;
+  }
+
   const parsed = updateKeySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
@@ -1877,9 +1896,8 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   let changedKey: string | undefined;
 
   if (key !== undefined) {
-    const db = getDb();
-    const stored = db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ?')
-      .get(id) as { platform: string; encrypted_key: string; iv: string; auth_tag: string } | undefined;
+    const stored = db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND mother_id = ?')
+      .get(id, motherId) as { platform: string; encrypted_key: string; iv: string; auth_tag: string } | undefined;
     if (!stored) {
       res.status(404).json({ error: { message: 'Key not found' } });
       return;
@@ -1938,7 +1956,6 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   }
   // Custom-endpoint group label (#1176) is written below, across the
   // endpoint's whole key pool rather than this one row.
-  const db = getDb();
   if (groupLabel !== undefined) {
     const row = db.prepare('SELECT platform FROM api_keys WHERE id = ?').get(id) as { platform: string } | undefined;
     if (!row) {
@@ -1957,14 +1974,14 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     values.push(scopeIds.length > 0 ? JSON.stringify(scopeIds) : null);
   }
 
-  values.push(id);
+  values.push(id, motherId);
 
   // Re-submitting the same key satisfies "something changed" but is a no-op;
   // it must not turn into an invalid UPDATE with an empty SET list.
   const result = db.transaction(() => {
     const changes = updates.length === 0
       ? 1
-      : db.prepare(`UPDATE api_keys SET ${updates.join(', ')} WHERE id = ?`).run(...values).changes;
+      : db.prepare(`UPDATE api_keys SET ${updates.join(', ')} WHERE id = ? AND mother_id = ?`).run(...values).changes;
     if (changes > 0 && groupLabel !== undefined) setCustomEndpointGroup(db, id, normalizeGroupLabel(groupLabel));
     return { changes };
   })();

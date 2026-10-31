@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, QrCode, CheckCircle2, Building2, AlertCircle } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field-error'
@@ -40,10 +40,13 @@ async function browserDesktopSession(): Promise<string> {
   return res.token
 }
 
-interface AuthStatus {
+export interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email: string | null
+  motherId?: string | null
+  companyName?: string | null
+  apiKey?: string | null
   desktop?: boolean
 }
 
@@ -59,36 +62,115 @@ function Centered({ children }: { children: ReactNode }) {
 
 function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () => void }) {
   const { t } = useI18n()
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>(mode === 'setup' ? 'register' : 'login')
+  const [qrCode, setQrCode] = useState('')
+  const [verifyingQr, setVerifyingQr] = useState(false)
+  const [verifiedCompany, setVerifiedCompany] = useState<{ motherId: string; companyName: string } | null>(null)
+  const [qrVerifyError, setQrVerifyError] = useState('')
+  const [showManual, setShowManual] = useState(false)
+  const [motherId, setMotherId] = useState('')
+  const [companyName, setCompanyName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [setupCode, setSetupCode] = useState('')
-  // Revealed only after the server asks for it (remote first-run setup). A
-  // browser on the same machine as the server never sees this field.
   const [codeRequired, setCodeRequired] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [showForgot, setShowForgot] = useState(false)
 
-  const isSetup = mode === 'setup'
+  const isRegister = activeTab === 'register'
 
-  // Inline field feedback; the server stays authoritative. Only the setup form
-  // enforces the password minimum client-side (an existing password of any
-  // length must still be able to log in). The same goes for the email shape:
-  // the desktop app's hidden account is `desktop@localhost` (no TLD), which
-  // the login route accepts on purpose (server/src/routes/auth.ts), so a
-  // browser tab must be able to submit it after a password reset (#1250).
+  // Clean and extract QR code from pasted text or URL
+  function handleQrChange(val: string) {
+    let cleanVal = val.trim()
+    if (cleanVal.includes('qrCode=') || cleanVal.includes('code=')) {
+      const match = cleanVal.match(/(?:qrCode|code)=([^&\s]+)/i)
+      if (match?.[1]) {
+        cleanVal = decodeURIComponent(match[1])
+      }
+    }
+    setQrCode(cleanVal)
+    setQrVerifyError('')
+    if (verifiedCompany) {
+      setVerifiedCompany(null)
+    }
+  }
+
+  // Verify QR code with backend
+  async function verifyQrCode(codeToVerify?: string): Promise<{ motherId: string; companyName: string } | null> {
+    const code = (codeToVerify ?? qrCode).trim()
+    if (!code) {
+      setQrVerifyError('Please enter or scan your PolarList QR / Scan code')
+      setVerifiedCompany(null)
+      return null
+    }
+
+    setVerifyingQr(true)
+    setQrVerifyError('')
+    try {
+      const res = await apiFetch<{
+        valid: boolean
+        motherId?: string | number | null
+        companyName?: string | null
+        message?: string
+      }>('/api/auth/validate-qr', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      })
+
+      if (res.valid && res.motherId) {
+        const info = {
+          motherId: String(res.motherId),
+          companyName: res.companyName || `Company ${res.motherId}`,
+        }
+        setVerifiedCompany(info)
+        setMotherId(info.motherId)
+        setCompanyName(info.companyName)
+        setQrVerifyError('')
+        return info
+      } else {
+        setVerifiedCompany(null)
+        setQrVerifyError(res.message || 'Invalid scan code. Please check with your administrator.')
+        return null
+      }
+    } catch (err: any) {
+      setVerifiedCompany(null)
+      setQrVerifyError(err.message || 'Failed to verify QR code with Polar backend')
+      return null
+    } finally {
+      setVerifyingQr(false)
+    }
+  }
+
+  const qrCodeError = isRegister && !showManual && !qrCode.trim()
+    ? 'PolarList QR code or scan key is required'
+    : null
+
+  const motherIdError = isRegister && showManual && !motherId.trim()
+    ? 'Mother ID is required'
+    : isRegister && showManual && motherId.trim().length < 2
+      ? 'Mother ID must be at least 2 characters'
+      : null
+
+  const companyNameError = isRegister && showManual && !companyName.trim()
+    ? 'Company name is required'
+    : null
+
   const emailError = !email.trim()
     ? t('validation.required')
-    : isSetup && !isEmail(email)
+    : isRegister && !isEmail(email)
       ? t('validation.email')
       : null
   const passwordError = !password
     ? t('validation.required')
-    : isSetup && password.length < PASSWORD_MIN
+    : isRegister && password.length < PASSWORD_MIN
       ? t('validation.passwordMin', { min: PASSWORD_MIN })
       : null
 
+  const showQrError = attempted && !showManual && (!qrCode.trim() || !!qrVerifyError)
+  const showMotherIdError = attempted && showManual && !!motherIdError
+  const showCompanyNameError = attempted && showManual && !!companyNameError
   const showEmailError = attempted && !!emailError
   const showPasswordError = attempted && !!passwordError
 
@@ -98,23 +180,54 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       setAttempted(true)
       return
     }
+
+    if (isRegister) {
+      if (!showManual && !qrCode.trim()) {
+        setAttempted(true)
+        return
+      }
+      if (showManual && (motherIdError || companyNameError)) {
+        setAttempted(true)
+        return
+      }
+    }
+
     setBusy(true)
     setError('')
     try {
       const payload: Record<string, string> = { email, password }
-      // Only the setup flow carries a code, and only once the server has asked
-      // for it. The server ignores it for local (loopback) setup.
-      if (isSetup && setupCode) payload.setupCode = setupCode.trim()
-      const res = await apiFetch<{ token: string }>(isSetup ? '/api/auth/setup' : '/api/auth/login', {
+      if (isRegister) {
+        if (!showManual) {
+          payload.qrCode = qrCode.trim()
+          // Automatically verify if not verified yet
+          if (!verifiedCompany) {
+            const info = await verifyQrCode(qrCode.trim())
+            if (!info) {
+              setBusy(false)
+              return
+            }
+            payload.motherId = info.motherId
+            payload.companyName = info.companyName
+          } else {
+            payload.motherId = verifiedCompany.motherId
+            payload.companyName = verifiedCompany.companyName
+          }
+        } else {
+          payload.motherId = motherId.trim().toUpperCase()
+          payload.companyName = companyName.trim()
+        }
+      }
+      if (setupCode) payload.setupCode = setupCode.trim()
+
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
+      const res = await apiFetch<{ token: string }>(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       })
       setToken(res.token)
       onAuthed()
     } catch (err) {
-      // The server gates remote first-run setup behind a one-time code; reveal
-      // the field so the operator can paste the code from the server logs.
-      if (isSetup && (err as ApiError).code === 'setup_code_required') {
+      if ((err as ApiError).code === 'setup_code_required') {
         setCodeRequired(true)
       }
       setError((err as Error).message)
@@ -123,7 +236,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
     }
   }
 
-  if (showForgot && !isSetup) {
+  if (showForgot && !isRegister) {
     return <ForgotPasswordForm onBack={() => setShowForgot(false)} onAuthed={onAuthed} />
   }
 
@@ -132,22 +245,172 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
       <div className="mb-6 flex items-center gap-2">
         <span className="inline-block size-2 rounded-full bg-foreground" />
         <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+        <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary ms-auto">
+          Multi-Tenant
+        </span>
       </div>
-      <div className="rounded-3xl border bg-card p-6">
-        <h1 className="text-lg font-semibold tracking-tight">{isSetup ? t('auth.createYourAccount') : t('auth.signIn')}</h1>
-        <p className="text-sm text-muted-foreground mt-1.5 mb-6">
-          {isSetup
-            ? t('auth.setupDescription')
-            : t('auth.loginDescription')}
+
+      <div className="rounded-3xl border bg-card p-6 shadow-sm">
+        <div className="flex border-b border-border/60 mb-5">
+          <button
+            type="button"
+            onClick={() => { setActiveTab('login'); setError(''); setAttempted(false); }}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
+              !isRegister
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t('auth.signIn')}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('register'); setError(''); setAttempted(false); }}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
+              isRegister
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Register Company
+          </button>
+        </div>
+
+        <h1 className="text-base font-semibold tracking-tight">
+          {isRegister ? 'Register with PolarList QR' : t('auth.signIn')}
+        </h1>
+        <p className="text-xs text-muted-foreground mt-1 mb-5">
+          {isRegister
+            ? 'Scan or enter your PolarList QR key to link company identity and get a dedicated LLM gateway.'
+            : 'Sign in to access your tenant LLM gateway, API keys, and models.'}
         </p>
-        <form onSubmit={submit} className="space-y-4" noValidate>
-          <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="auth-email">{t('auth.email')}</Label>
+
+        <form onSubmit={submit} className="space-y-3.5" noValidate>
+          {isRegister && !showManual && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium flex items-center gap-1.5" htmlFor="auth-qr-code">
+                  <QrCode className="size-3.5 text-primary" />
+                  PolarList QR / Scan Code <span className="text-destructive">*</span>
+                </Label>
+                {verifiedCompany && (
+                  <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="size-3" /> Verified
+                  </span>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <Input
+                  id="auth-qr-code"
+                  type="text"
+                  value={qrCode}
+                  onChange={e => handleQrChange(e.target.value)}
+                  placeholder="Paste PLQR-... or registration link"
+                  className="font-mono text-xs"
+                  aria-invalid={showQrError}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => verifyQrCode()}
+                  disabled={verifyingQr || !qrCode.trim()}
+                  className="shrink-0 text-xs px-3 font-semibold"
+                >
+                  {verifyingQr ? <Loader2 className="size-3.5 animate-spin" /> : 'Verify'}
+                </Button>
+              </div>
+
+              {attempted && qrCodeError && (
+                <FieldError id="auth-qr-error" error={qrCodeError} />
+              )}
+              {qrVerifyError && (
+                <p className="text-[11px] text-destructive mt-1 flex items-center gap-1">
+                  <AlertCircle className="size-3 shrink-0" />
+                  {qrVerifyError}
+                </p>
+              )}
+
+              {/* Verified Company Banner */}
+              {verifiedCompany && (
+                <div className="mt-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 text-xs space-y-0.5 animate-in fade-in">
+                  <div className="font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <Building2 className="size-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>{verifiedCompany.companyName}</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
+                    Mother ID: <span className="font-mono font-medium">{verifiedCompany.motherId}</span> • Active PolarList Tenant
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-1 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setShowManual(true); setQrVerifyError(''); }}
+                  className="text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Don't have a QR code? Enter manually
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isRegister && showManual && (
+            <>
+              <div className="space-y-1">
+                <Label className="text-xs font-medium" htmlFor="auth-mother-id">
+                  Mother ID <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="auth-mother-id"
+                  type="text"
+                  autoCapitalize="characters"
+                  value={motherId}
+                  onChange={e => setMotherId(e.target.value.toUpperCase())}
+                  placeholder="e.g. 4141 or POLAR_CORP_01"
+                  aria-invalid={showMotherIdError}
+                />
+                {attempted && <FieldError id="auth-mother-id-error" error={motherIdError} />}
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-medium" htmlFor="auth-company-name">
+                  Company Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="auth-company-name"
+                  type="text"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                  placeholder="e.g. SM Infra Projects"
+                  aria-invalid={showCompanyNameError}
+                />
+                {attempted && <FieldError id="auth-company-name-error" error={companyNameError} />}
+              </div>
+
+              <div className="pt-0.5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowManual(false)}
+                  className="text-[10px] text-primary hover:underline font-medium flex items-center gap-1"
+                >
+                  <QrCode className="size-3" /> Use PolarList QR Code instead
+                </button>
+              </div>
+            </>
+          )}
+
+          <div className="space-y-1">
+            <Label className="text-xs font-medium" htmlFor="auth-email">
+              {t('auth.email')} <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="auth-email"
               type="email"
               autoComplete="username"
-              autoFocus
+              autoFocus={!isRegister}
               value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder={t('auth.emailPlaceholder')}
@@ -156,22 +419,26 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
             />
             {attempted && <FieldError id="auth-email-error" error={emailError} />}
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="auth-password">{t('auth.password')}</Label>
+
+          <div className="space-y-1">
+            <Label className="text-xs font-medium" htmlFor="auth-password">
+              {t('auth.password')} <span className="text-destructive">*</span>
+            </Label>
             <PasswordInput
               id="auth-password"
-              autoComplete={isSetup ? 'new-password' : 'current-password'}
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder={isSetup ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
+              placeholder={isRegister ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
               aria-invalid={showPasswordError}
               aria-describedby={showPasswordError ? 'auth-password-error' : undefined}
             />
             {attempted && <FieldError id="auth-password-error" error={passwordError} />}
           </div>
-          {isSetup && codeRequired && (
-            <div className="space-y-1.5">
-              <Label className="text-xs" htmlFor="auth-setup-code">{t('auth.setupCode')}</Label>
+
+          {isRegister && codeRequired && (
+            <div className="space-y-1">
+              <Label className="text-xs font-medium" htmlFor="auth-setup-code">{t('auth.setupCode')}</Label>
               <Input
                 id="auth-setup-code"
                 type="text"
@@ -184,19 +451,20 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
               <p id="auth-setup-code-hint" className="text-xs text-muted-foreground">{t('auth.setupCodeHint')}</p>
             </div>
           )}
-          {/* A server rejection is the one error nobody can predict; it gets the same
-              announcement and the same visual weight as the inline field errors. */}
+
           {error && (
             <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
             </p>
           )}
-          <Button type="submit" className="w-full h-10" disabled={busy}>
+
+          <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
             {busy && <Loader2 className="animate-spin" aria-hidden />}
-            {busy ? (isSetup ? t('auth.creating') : t('auth.signingIn')) : isSetup ? t('auth.createAccount') : t('auth.signIn')}
+            {busy ? (isRegister ? 'Registering Account...' : t('auth.signingIn')) : isRegister ? (verifiedCompany ? `Register for ${verifiedCompany.companyName}` : 'Register Company') : t('auth.signIn')}
           </Button>
         </form>
-        {!isSetup && (
+
+        {!isRegister && (
           <button
             type="button"
             onClick={() => setShowForgot(true)}
@@ -459,14 +727,18 @@ export function ChangeCredentialsModal({ mode, onClose }: ChangeCredentialsModal
   )
 }
 
+export function useAuthStatus() {
+  return useQuery<AuthStatus>({
+    queryKey: ['auth-status'],
+    queryFn: () => apiFetch('/api/auth/status'),
+    staleTime: 30_000,
+  })
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
-  const { data, isLoading, isError, refetch } = useQuery<AuthStatus>({
-    queryKey: ['auth-status'],
-    queryFn: () => apiFetch('/api/auth/status'),
-    retry: false,
-  })
+  const { data, isLoading, isError, refetch } = useAuthStatus()
 
   useEffect(() => {
     const handler = () => { refetch() }

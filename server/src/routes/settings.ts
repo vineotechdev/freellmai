@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getUnifiedApiKey, regenerateUnifiedKey, getSetting, setSetting, getDb } from '../db/index.js';
+import { getTenantApiKey, regenerateTenantApiKey } from '../services/tenant.js';
 import { applyProxyUrl, applyProxyMode, applyProxyEnabled, applyProxyBypass, applyFetchRelayToken, encodeFetchRelayToken, isProxyActive, getProxyUrl, getProxyMode, getFetchRelayToken, isProxyEnabled, getProxyBypassPlatforms, probeProxyUrl, fetchRelayUrlError, DEFAULT_PROXY_PROBE_TARGET, PROXY_MODES, PROXY_SCHEMES } from '../lib/proxy.js';
 import { getProvider } from '../providers/index.js';
 import type { Platform } from '@freellmapi/shared/types.js';
@@ -473,15 +474,20 @@ settingsRouter.put('/guardrails', (req: Request, res: Response) => {
   });
 });
 
-// Get the unified API key
-settingsRouter.get('/api-key', (_req: Request, res: Response) => {
-  res.json({ apiKey: getUnifiedApiKey() });
+// Get the unified API key (scoped to tenant mother_id)
+settingsRouter.get('/api-key', (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = user?.motherId || 'default';
+  const apiKey = getTenantApiKey(motherId, user?.companyName);
+  res.json({ apiKey, motherId, companyName: user?.companyName });
 });
 
-// Regenerate the unified API key
-settingsRouter.post('/api-key/regenerate', (_req: Request, res: Response) => {
-  const newKey = regenerateUnifiedKey();
-  res.json({ apiKey: newKey });
+// Regenerate the unified API key (scoped to tenant mother_id)
+settingsRouter.post('/api-key/regenerate', (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = user?.motherId || 'default';
+  const newKey = regenerateTenantApiKey(motherId, user?.companyName);
+  res.json({ apiKey: newKey, motherId, companyName: user?.companyName });
 });
 
 // Get the proxy settings

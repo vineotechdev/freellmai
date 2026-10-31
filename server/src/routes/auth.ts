@@ -15,6 +15,7 @@ import {
   normalizeEmail,
   desktopSessionToken,
 } from '../services/auth.js';
+import { signJwtToken, getTenantApiKey, validatePolarQrCode, extractQrCode } from '../services/tenant.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import { generateResetCode, resetCodeMatches, clearResetCode } from '../lib/reset-code.js';
 
@@ -22,27 +23,28 @@ export const authRouter = Router();
 
 const failedPasswordAttempts = new Map<number, number>();
 
-// Dashboard auth (#35). These routes are mounted BEFORE requireAuth, so
-// /status, /setup and /login are reachable without a session (bootstrap);
-// /logout and /me validate the token themselves.
+// Multi-tenant registration schema (accepts Polar QR code or manual motherId & companyName)
+const registerSchema = z.object({
+  qrCode: z.string().trim().optional(),
+  motherId: z.string().trim().optional(),
+  companyName: z.string().trim().optional(),
+  email: z.string().email('A valid email is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
 
 // Signing up is the one place the address has to look like an address.
 const signupSchema = z.object({
   email: z.string().email('A valid email is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  qrCode: z.string().optional(),
+  motherId: z.string().optional(),
+  companyName: z.string().optional(),
 });
 
-// Logging in is a lookup, not a registration, so the address is matched rather
-// than validated. The desktop app seeds its hidden account as
-// `desktop@localhost` (server-host.ts), which has no TLD and so could never
-// satisfy z.email() — every login attempt on a desktop install failed with
-// "A valid email is required" before the password was even checked, including
-// the reset-then-sign-in-from-a-browser route suggested in #807. Length rules
-// belong to signup too: an account created under an older policy must still be
-// able to get in.
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required'),
   password: z.string().min(1, 'Password is required'),
+  motherId: z.string().optional(),
 });
 
 // ── Brute-force throttle ──────────────────────────────────────────────────
@@ -189,10 +191,14 @@ export function desktopSignInAllowed(req: Request): boolean {
 // sign-in form.
 authRouter.get('/status', (req: Request, res: Response) => {
   const session = validateSession(bearer(req));
+  const apiKey = session ? getTenantApiKey(session.motherId, session.companyName) : null;
   res.json({
     needsSetup: userCount() === 0,
     authenticated: !!session,
     email: session?.email ?? null,
+    motherId: session?.motherId ?? null,
+    companyName: session?.companyName ?? null,
+    apiKey,
     desktop: desktopSignInAllowed(req),
   });
 });
@@ -205,19 +211,140 @@ authRouter.post('/desktop-session', (req: Request, res: Response) => {
   res.json({ token: desktopSessionToken() });
 });
 
-// First-run account creation. Only allowed while there are zero users, so it
-// can't be used to add accounts once the dashboard is claimed.
-authRouter.post('/setup', (req: Request, res: Response) => {
-  if (userCount() > 0) {
-    clearSetupCode();
-    res.status(409).json({ error: { message: 'Setup already completed. Use login instead.', type: 'setup_complete' } });
+// Validate PolarList QR / Scan code via internal call to Polar backend
+authRouter.get('/validate-qr', async (req: Request, res: Response) => {
+  const code = String(req.query.code || req.query.qrCode || '');
+  const result = await validatePolarQrCode(code);
+  res.json(result);
+});
+
+authRouter.post('/validate-qr', async (req: Request, res: Response) => {
+  const code = String(req.body?.code || req.body?.qrCode || '');
+  const result = await validatePolarQrCode(code);
+  res.json(result);
+});
+
+// Multi-tenant registration: creates user with Polar QR code or mother_id & company_name
+authRouter.post('/register', async (req: Request, res: Response) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
 
-  // Local/desktop first-run stays frictionless: a browser on this machine can
-  // claim the dashboard without any code. A remote caller must present the
-  // one-time setup code logged at boot, so an exposed fresh install can't be
-  // claimed by a stranger who finds it first.
+  let motherId = parsed.data.motherId ? parsed.data.motherId.trim() : '';
+  let companyName = parsed.data.companyName ? parsed.data.companyName.trim() : '';
+  const qrCodeInput = parsed.data.qrCode ? parsed.data.qrCode.trim() : '';
+
+  // If QR code is provided, validate internally against Polar backend
+  if (qrCodeInput) {
+    const qrResult = await validatePolarQrCode(qrCodeInput);
+    if (!qrResult.valid || !qrResult.motherId) {
+      res.status(400).json({
+        error: {
+          message: qrResult.message || 'Invalid PolarList scan code. Please check with your administrator.',
+          type: 'invalid_qr_code',
+        },
+      });
+      return;
+    }
+    motherId = String(qrResult.motherId);
+    companyName = qrResult.companyName || companyName || `Company ${motherId}`;
+  }
+
+  if (!motherId || !companyName) {
+    res.status(400).json({
+      error: {
+        message: 'Polar QR code or Scan Key is required to register your company account.',
+        type: 'missing_tenant_info',
+      },
+    });
+    return;
+  }
+
+  try {
+    const user = createUser({
+      motherId,
+      companyName,
+      qrCode: qrCodeInput || undefined,
+      email: parsed.data.email,
+      password: parsed.data.password,
+    });
+    clearSetupCode();
+    createSession(user.userId);
+    const token = signJwtToken({
+      userId: user.userId,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+    });
+    const apiKey = getTenantApiKey(user.motherId, user.companyName);
+    res.status(201).json({
+      token,
+      email: user.email,
+      motherId: user.motherId,
+      companyName: user.companyName,
+      apiKey,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: { message: err.message || 'Registration failed' } });
+  }
+});
+
+// First-run account creation or setup.
+authRouter.post('/setup', async (req: Request, res: Response) => {
+  if (userCount() > 0) {
+    // In multi-tenant mode, forward to registration if users already exist
+    const parsedReg = registerSchema.safeParse(req.body);
+    if (parsedReg.success) {
+      let motherId = parsedReg.data.motherId ? parsedReg.data.motherId.trim() : '';
+      let companyName = parsedReg.data.companyName ? parsedReg.data.companyName.trim() : '';
+      const qrCodeInput = parsedReg.data.qrCode ? parsedReg.data.qrCode.trim() : '';
+
+      if (qrCodeInput) {
+        const qrResult = await validatePolarQrCode(qrCodeInput);
+        if (qrResult.valid && qrResult.motherId) {
+          motherId = String(qrResult.motherId);
+          companyName = qrResult.companyName || companyName || `Company ${motherId}`;
+        }
+      }
+
+      if (motherId && companyName) {
+        try {
+          const user = createUser({
+            motherId,
+            companyName,
+            qrCode: qrCodeInput || undefined,
+            email: parsedReg.data.email,
+            password: parsedReg.data.password,
+          });
+          createSession(user.userId);
+          const token = signJwtToken({
+            userId: user.userId,
+            email: user.email,
+            motherId: user.motherId,
+            companyName: user.companyName,
+          });
+          const apiKey = getTenantApiKey(user.motherId, user.companyName);
+          res.status(201).json({
+            token,
+            email: user.email,
+            motherId: user.motherId,
+            companyName: user.companyName,
+            apiKey,
+          });
+          return;
+        } catch (err: any) {
+          res.status(400).json({ error: { message: err.message || 'Registration failed' } });
+          return;
+        }
+      }
+    }
+    clearSetupCode();
+    res.status(409).json({ error: { message: 'Setup already completed. Use login or register instead.', type: 'setup_complete' } });
+    return;
+  }
+
   if (!isLoopbackRemote(req) && !setupCodeMatches((req.body ?? {}).setupCode)) {
     res.status(403).json({
       error: {
@@ -234,10 +361,28 @@ authRouter.post('/setup', (req: Request, res: Response) => {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
-  const user = createUser(parsed.data.email, parsed.data.password);
-  clearSetupCode(); // one-time: the dashboard is now claimed
-  const token = createSession(user.userId);
-  res.status(201).json({ token, email: user.email });
+  const user = createUser({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    motherId: parsed.data.motherId,
+    companyName: parsed.data.companyName,
+  });
+  clearSetupCode();
+  createSession(user.userId);
+  const token = signJwtToken({
+    userId: user.userId,
+    email: user.email,
+    motherId: user.motherId,
+    companyName: user.companyName,
+  });
+  const apiKey = getTenantApiKey(user.motherId, user.companyName);
+  res.status(201).json({
+    token,
+    email: user.email,
+    motherId: user.motherId,
+    companyName: user.companyName,
+    apiKey,
+  });
 });
 
 authRouter.post('/login', (req: Request, res: Response) => {
@@ -246,28 +391,37 @@ authRouter.post('/login', (req: Request, res: Response) => {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
-  const { email, password } = parsed.data;
+  const { email, password, motherId } = parsed.data;
 
   if (isLockedOut(email)) {
-    // RFC 6585: a 429 must say when the client may return. The whole gateway
-    // already does this (proxy limiter, exhaustion Retry-After, monthly budget
-    // cap); the dashboard's own lockout was the one 429 that didn't.
     res.setHeader('Retry-After', String(lockoutRetryAfterSec(email)));
     res.status(429).json({ error: { message: 'Too many attempts. Wait 15 minutes or restart the app.', type: 'rate_limit_error' } });
     return;
   }
 
-  const user = verifyCredentials(email, password);
+  const user = verifyCredentials(email, password, motherId);
   if (!user) {
     recordFailure(email);
-    // Same message whether the email exists or not — don't leak which.
     res.status(401).json({ error: { message: 'Invalid email or password', type: 'authentication_error' } });
     return;
   }
 
   clearFailures(email);
-  const token = createSession(user.userId);
-  res.json({ token, email: user.email });
+  createSession(user.userId);
+  const token = signJwtToken({
+    userId: user.userId,
+    email: user.email,
+    motherId: user.motherId,
+    companyName: user.companyName,
+  });
+  const apiKey = getTenantApiKey(user.motherId, user.companyName);
+  res.json({
+    token,
+    email: user.email,
+    motherId: user.motherId,
+    companyName: user.companyName,
+    apiKey,
+  });
 });
 
 authRouter.post('/logout', (req: Request, res: Response) => {
@@ -281,7 +435,14 @@ authRouter.get('/me', (req: Request, res: Response) => {
     res.status(401).json({ error: { message: 'Authentication required', type: 'authentication_error' } });
     return;
   }
-  res.json({ email: session.email });
+  const apiKey = getTenantApiKey(session.motherId, session.companyName);
+  res.json({
+    userId: session.userId,
+    email: session.email,
+    motherId: session.motherId,
+    companyName: session.companyName,
+    apiKey,
+  });
 });
 
 // Change email (requires active session + current password)

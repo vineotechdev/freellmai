@@ -1,16 +1,28 @@
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
+import { getJwtSecret, getTenantApiKey, normalizeMotherId } from './tenant.js';
 
-// Dashboard authentication: email + password accounts with opaque session
-// tokens. Distinct from the unified API key, which authenticates the /v1 proxy
-// for apps — this gates the /api/* admin surface for the human operator (#35).
+// Dashboard authentication: email + password accounts with JWT & session
+// tokens. Multi-tenant support with mother_id and company_name.
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export interface SessionUser {
   userId: number;
   email: string;
+  motherId: string;
+  companyName: string;
+  qrCode?: string | null;
+}
+
+export interface CreateUserInput {
+  email: string;
+  password: string;
+  motherId?: string;
+  companyName?: string;
+  qrCode?: string;
 }
 
 function sha256(s: string): string {
@@ -30,29 +42,79 @@ export function userCount(): number {
   return row.c;
 }
 
-/** Create a user. Throws { code: 'email_taken' } if the email already exists. */
-export function createUser(email: string, password: string): SessionUser {
+/** Create a user. Supports multi-tenant (motherId, companyName). Throws { code: 'email_taken' } if the email already exists for tenant. */
+export function createUser(inputOrEmail: CreateUserInput | string, legacyPassword?: string): SessionUser {
   const db = getDb();
+  let email = '';
+  let password = '';
+  let motherId = 'default';
+  let companyName = 'Default Company';
+  let qrCode: string | null = null;
+
+  if (typeof inputOrEmail === 'string') {
+    email = inputOrEmail;
+    password = legacyPassword || '';
+  } else {
+    email = inputOrEmail.email;
+    password = inputOrEmail.password;
+    motherId = inputOrEmail.motherId ? normalizeMotherId(inputOrEmail.motherId) : 'default';
+    companyName = inputOrEmail.companyName ? inputOrEmail.companyName.trim() : 'Default Company';
+    qrCode = inputOrEmail.qrCode ? inputOrEmail.qrCode.trim() : null;
+  }
+
   const normalized = normalizeEmail(email);
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalized);
+  const existing = db.prepare('SELECT id FROM users WHERE email = ? AND mother_id = ?').get(normalized, motherId);
   if (existing) {
-    const err = new Error('An account with that email already exists') as any;
+    const err = new Error('An account with that email already exists for this tenant') as any;
     err.code = 'email_taken';
     throw err;
   }
-  const result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
-    .run(normalized, hashPassword(password));
-  return { userId: Number(result.lastInsertRowid), email: normalized };
+
+  // Ensure qr_code column exists if missing
+  try {
+    const cols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+    if (!cols.some(c => c.name === 'qr_code')) {
+      db.prepare('ALTER TABLE users ADD COLUMN qr_code TEXT').run();
+    }
+  } catch {}
+
+  let result;
+  try {
+    result = db.prepare('INSERT INTO users (mother_id, company_name, qr_code, email, password_hash) VALUES (?, ?, ?, ?, ?)')
+      .run(motherId, companyName, qrCode, normalized, hashPassword(password));
+  } catch {
+    result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
+      .run(motherId, companyName, normalized, hashPassword(password));
+  }
+
+  const userId = Number(result.lastInsertRowid);
+  // Ensure tenant API key exists
+  getTenantApiKey(motherId, companyName);
+
+  return { userId, email: normalized, motherId, companyName, qrCode };
 }
 
-/** Verify credentials. Returns the user on success, null on failure. */
-export function verifyCredentials(email: string, password: string): SessionUser | null {
+/** Verify credentials. Returns the user on success, null on failure. Supports optional motherId. */
+export function verifyCredentials(email: string, password: string, motherId?: string): SessionUser | null {
   const db = getDb();
-  const row = db.prepare('SELECT id, email, password_hash FROM users WHERE email = ?')
-    .get(normalizeEmail(email)) as { id: number; email: string; password_hash: string } | undefined;
+  let row: { id: number; email: string; password_hash: string; mother_id?: string; company_name?: string } | undefined;
+
+  if (motherId && motherId.trim()) {
+    row = db.prepare('SELECT id, email, password_hash, mother_id, company_name FROM users WHERE email = ? AND mother_id = ?')
+      .get(normalizeEmail(email), normalizeMotherId(motherId)) as any;
+  } else {
+    row = db.prepare('SELECT id, email, password_hash, mother_id, company_name FROM users WHERE email = ? ORDER BY id DESC LIMIT 1')
+      .get(normalizeEmail(email)) as any;
+  }
+
   if (!row) return null;
   if (!verifyPassword(password, row.password_hash)) return null;
-  return { userId: row.id, email: row.email };
+  return {
+    userId: row.id,
+    email: row.email,
+    motherId: row.mother_id || 'default',
+    companyName: row.company_name || 'Default Company',
+  };
 }
 
 /** Desktop app only: a session for the install's account, creating the hidden
@@ -75,21 +137,55 @@ export function createSession(userId: number): string {
   return token;
 }
 
-/** Resolve a session token to its user, or null if missing/expired. */
+/** Resolve a session or JWT token to its user, or null if missing/expired. */
 export function validateSession(token: string | undefined | null): SessionUser | null {
   if (!token) return null;
+  const trimmed = token.trim();
+
+  // 1. JWT verification
+  if (trimmed.split('.').length === 3) {
+    try {
+      const decoded = jwt.verify(trimmed, getJwtSecret()) as {
+        userId: number;
+        email: string;
+        motherId?: string;
+        companyName?: string;
+      };
+      if (decoded && decoded.userId) {
+        const user = getDb().prepare('SELECT id, email, mother_id, company_name FROM users WHERE id = ?')
+          .get(decoded.userId) as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
+        if (user) {
+          return {
+            userId: user.id,
+            email: user.email,
+            motherId: user.mother_id || decoded.motherId || 'default',
+            companyName: user.company_name || decoded.companyName || 'Default Company',
+          };
+        }
+      }
+    } catch {
+      // invalid or expired jwt, proceed to session check
+    }
+  }
+
+  // 2. Legacy session token check
   const db = getDb();
   const row = db.prepare(`
-    SELECT s.user_id, s.expires_at_ms, u.email
+    SELECT s.user_id, s.expires_at_ms, u.email, u.mother_id, u.company_name
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
-  `).get(sha256(token)) as { user_id: number; expires_at_ms: number; email: string } | undefined;
+  `).get(sha256(trimmed)) as { user_id: number; expires_at_ms: number; email: string; mother_id?: string; company_name?: string } | undefined;
   if (!row) return null;
   if (row.expires_at_ms < Date.now()) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(trimmed));
     return null;
   }
-  return { userId: row.user_id, email: row.email };
+  return {
+    userId: row.user_id,
+    email: row.email,
+    motherId: row.mother_id || 'default',
+    companyName: row.company_name || 'Default Company',
+  };
 }
 
 export function deleteSession(token: string | undefined | null): void {
@@ -142,9 +238,14 @@ export function accountEmail(): string | null {
  */
 export function resetUserPassword(newPassword: string): SessionUser | null {
   const db = getDb();
-  const row = db.prepare('SELECT id, email FROM users LIMIT 1').get() as { id: number; email: string } | undefined;
+  const row = db.prepare('SELECT id, email, mother_id, company_name FROM users LIMIT 1').get() as { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
   if (!row) return null;
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), row.id);
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.id);
-  return { userId: row.id, email: row.email };
+  return {
+    userId: row.id,
+    email: row.email,
+    motherId: row.mother_id || 'default',
+    companyName: row.company_name || 'Default Company',
+  };
 }

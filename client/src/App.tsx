@@ -14,7 +14,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { AuthGate, ChangeCredentialsModal } from '@/components/auth-gate'
+import { AuthGate, ChangeCredentialsModal, useAuthStatus } from '@/components/auth-gate'
 import { CommandPalette } from '@/components/command-palette'
 import { openCommandPalette } from '@/components/command-palette-state'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -238,12 +238,70 @@ function AccountMenuItems({
   )
 }
 
+function TenantBanner() {
+  const { data: authData } = useAuthStatus()
+  const [copied, setCopied] = useState(false)
+
+  if (!authData?.authenticated || !authData?.motherId) return null
+
+  const handleCopyKey = () => {
+    if (authData.apiKey) {
+      navigator.clipboard.writeText(authData.apiKey)
+      setCopied(true)
+      toast.success('Tenant API Key copied to clipboard!')
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <div className="bg-primary/5 border-b border-primary/20 py-2 px-4 sm:px-6">
+      <div className="mx-auto max-w-6xl flex flex-wrap items-center justify-between gap-2.5 text-xs">
+        <div className="flex items-center flex-wrap gap-2.5">
+          <div className="flex items-center gap-1.5 font-semibold text-foreground">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-muted-foreground font-normal">Company:</span>
+            <span>{authData.companyName || 'PolarList'}</span>
+          </div>
+
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono text-[11px] border border-primary/25">
+            <span className="text-muted-foreground">Mother ID:</span>
+            <span className="font-bold">{authData.motherId}</span>
+          </div>
+
+          {authData.email && (
+            <span className="text-muted-foreground text-[11px] hidden sm:inline">
+              ({authData.email})
+            </span>
+          )}
+        </div>
+
+        {authData.apiKey && (
+          <div className="flex items-center gap-2 ms-auto sm:ms-0">
+            <div className="flex items-center gap-1.5 bg-background border rounded px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+              <KeyRound className="size-3 text-primary" />
+              <span>{authData.apiKey.slice(0, 15)}...{authData.apiKey.slice(-4)}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyKey}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors shadow-xs"
+            >
+              {copied ? 'Copied!' : 'Copy API Key'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Navbar() {
   const { t } = useI18n()
   const location = useLocation()
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
+  const { data: authData } = useAuthStatus()
   // The update pill lives outside the navbar; it asks for this dialog by event.
   useEffect(() => {
     const open = () => setUpdatesOpen(true)
@@ -269,7 +327,16 @@ function Navbar() {
           className={`mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isMacDesktop ? 'pl-20 sm:pl-20' : ''}`}
           style={isMacDesktop ? { minHeight: 52 } : undefined}
         >
-          <Brand />
+          <div className="flex items-center gap-2.5">
+            <Brand />
+            {authData?.motherId && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-secondary text-[11px] font-medium text-secondary-foreground border border-border/50">
+                <span className="font-semibold max-w-[120px] truncate">{authData.companyName || 'Tenant'}</span>
+                <span className="text-muted-foreground">•</span>
+                <span className="font-mono text-primary font-bold">{authData.motherId}</span>
+              </span>
+            )}
+          </div>
           <nav
             className="ms-10 hidden items-center gap-6 md:flex"
             style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
@@ -400,6 +467,7 @@ function Navbar() {
           </div>
         </div>
       </header>
+      <TenantBanner />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <UpdatesDialog open={updatesOpen} onOpenChange={setUpdatesOpen} />
       {credentialsMode && (

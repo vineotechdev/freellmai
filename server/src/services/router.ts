@@ -1579,7 +1579,7 @@ function cachedDecrypt(keyId: number, ct: string, iv: string, authTag: string): 
   return plain;
 }
 
-function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[]): RouteResult | null {
+function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: Set<string>, diag?: string[], motherId?: string): RouteResult | null {
   const db = getDb();
   const label = `${entry.platform}/${entry.model_id}`;
 
@@ -1589,11 +1589,18 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   }
   const provider = getProvider(entry.platform as Platform)!;
 
-  const allKeys = db.prepare(
-    "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
-  ).all(entry.platform) as KeyRow[];
+  let allKeys: KeyRow[];
+  if (motherId && motherId !== 'all') {
+    allKeys = db.prepare(
+      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND mother_id = ?"
+    ).all(entry.platform, motherId) as KeyRow[];
+  } else {
+    allKeys = db.prepare(
+      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
+    ).all(entry.platform) as KeyRow[];
+  }
   if (allKeys.length === 0) {
-    diag?.push(`${label}: no enabled+healthy key for platform`);
+    diag?.push(`${label}: no enabled+healthy key for platform${motherId ? ` (tenant ${motherId})` : ''}`);
     return null;
   }
 
@@ -1898,7 +1905,7 @@ export function fitsContextWindow(_platform: string, contextWindow: number | nul
  * silently collapsed onto whatever else is available. `skipKeys` lets a slot
  * exclude keys it already failed on this request.
  */
-export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skipKeys?: Set<string>): RouteResult | null {
+export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skipKeys?: Set<string>, motherId?: string): RouteResult | null {
   const db = getDb();
   const entry = getModelChainRow(db, modelDbId);
   if (!entry) return null;
@@ -1908,7 +1915,7 @@ export function routePinnedModel(modelDbId: number, estimatedTokens = 1000, skip
   // 400 is classified and retried downstream). Nothing is multiplied here —
   // estimatedTokens already carries the exact capped output reserve (#470).
   if (!rowFitsRequestSize(entry, estimatedTokens)) return null;
-  return selectKeyForModel(entry, estimatedTokens, skipKeys);
+  return selectKeyForModel(entry, estimatedTokens, skipKeys, undefined, motherId);
 }
 
 function rowFitsRequestSize(entry: ChainRow, estimatedTokens: number): boolean {
@@ -2160,7 +2167,20 @@ export function resolveFusionCandidate(modelId: string): FusionCandidate | null 
   return null;
 }
 
-export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number, requireVision = false, requireTools = false, skipModels?: Set<number>, prefetchedChain?: ChainRow[], requireStructured = false, skipPlatforms?: Set<string>, exactOutputReserve = 0, task?: 'code' | 'chat'): RouteResult {
+export function routeRequest(
+  estimatedTokens = 1000,
+  skipKeys?: Set<string>,
+  preferredModelDbId?: number,
+  requireVision = false,
+  requireTools = false,
+  skipModels?: Set<number>,
+  prefetchedChain?: ChainRow[],
+  requireStructured = false,
+  skipPlatforms?: Set<string>,
+  exactOutputReserve = 0,
+  task?: 'code' | 'chat',
+  motherId?: string
+): RouteResult {
   const db = getDb();
 
   const strategy = effectiveRoutingStrategy();
@@ -2378,7 +2398,7 @@ export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, pre
     // first usable key's RouteResult, or null when the model has no key that
     // can serve right now — in which case we fall through to the next model in
     // the sorted chain for THIS request (no explicit penalty needed).
-    const route = selectKeyForModel(entry, estimatedTokens, skipKeys, diag);
+    const route = selectKeyForModel(entry, estimatedTokens, skipKeys, diag, motherId);
     if (route) return route;
   }
 
