@@ -123,6 +123,61 @@ export function createUser(inputOrEmail: CreateUserInput | string, legacyPasswor
   return { userId, email: normalized, motherId: normalizedMotherId, companyName, qrCode };
 }
 
+/**
+ * Upsert or retrieve user when authenticated via PolarList backend.
+ */
+export function upsertUserFromPolarLogin(input: {
+  email: string;
+  motherId?: string | number;
+  companyName?: string;
+  password?: string;
+}): { userId: number; email: string; motherId: string; companyName: string } {
+  const db = getDb();
+  const normalized = normalizeEmail(input.email);
+  const normalizedMotherId = normalizeMotherId(String(input.motherId || 'default'));
+  const compName = input.companyName ? input.companyName.trim() : 'PolarList Company';
+
+  const existing = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(normalized) as any;
+  if (existing) {
+    try {
+      if (input.password) {
+        const passHash = hashPassword(input.password);
+        db.prepare('UPDATE users SET mother_id = ?, company_name = ?, password_hash = ? WHERE id = ?')
+          .run(normalizedMotherId, compName, passHash, existing.id);
+      } else {
+        db.prepare('UPDATE users SET mother_id = ?, company_name = ? WHERE id = ?')
+          .run(normalizedMotherId, compName, existing.id);
+      }
+    } catch {}
+    getTenantApiKey(normalizedMotherId, compName);
+    return { userId: Number(existing.id), email: normalized, motherId: normalizedMotherId, companyName: compName };
+  }
+
+  // Create new user in local SQLite DB
+  const passHash = hashPassword(input.password || crypto.randomBytes(16).toString('hex'));
+  let result;
+  try {
+    result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
+      .run(normalizedMotherId, compName, normalized, passHash);
+  } catch (err: any) {
+    try {
+      result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
+        .run(normalized, passHash);
+    } catch (err2: any) {
+      const row = db.prepare('SELECT id FROM users WHERE email = ?').get(normalized) as any;
+      if (row) {
+        return { userId: Number(row.id), email: normalized, motherId: normalizedMotherId, companyName: compName };
+      }
+      throw err2;
+    }
+  }
+
+  const userId = Number(result.lastInsertRowid);
+  getTenantApiKey(normalizedMotherId, compName);
+  void persistUserToPostgres({ email: normalized, password_hash: passHash, mother_id: normalizedMotherId, company_name: compName });
+  return { userId, email: normalized, motherId: normalizedMotherId, companyName: compName };
+}
+
 /** Verify credentials. Returns the user on success, null on failure. Supports optional motherId. */
 export function verifyCredentials(email: string, password: string, motherId?: string): SessionUser | null {
   const db = getDb();

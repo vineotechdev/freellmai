@@ -180,6 +180,94 @@ export function getJwtSecret(): string {
   return 'a8f3c9d2b7e14f6a9c3e5d8f1a2b4c6d7e9f0a1b3c5d7e8f9a0b2c4d6e8f1a3';
 }
 
+export interface PolarAuthResult {
+  success: boolean;
+  rateLimited?: boolean;
+  forbidden?: boolean;
+  status?: number;
+  message?: string;
+  data?: {
+    token: string;
+    jwtToken?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    userId: number;
+    email: string;
+    motherId: string | number;
+    mother_id?: string | number;
+    companyName: string;
+    company_name?: string;
+    displayName?: string;
+    website?: string;
+    apiKey?: string;
+  };
+}
+
+/**
+ * Call PolarList backend /api/v1/auth/ai-login to authenticate user with
+ * username/email and password against PolarList and Firebase.
+ */
+export async function authenticateWithPolarBackend(
+  identifier: string,
+  password: string,
+  website: string = 'https://ai.polarlist.in'
+): Promise<PolarAuthResult> {
+  const url = LLMAI_CONSTANTS.POLAR_AI_LOGIN_URL;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: LLMAI_CONSTANTS.POLAR_API_HEADERS,
+      body: JSON.stringify({
+        identifier: identifier.trim(),
+        username: identifier.trim(),
+        email: identifier.trim(),
+        password,
+        website,
+      }),
+    });
+
+    if (response.status === 429) {
+      const errData = await response.json().catch(() => null) as any;
+      return {
+        success: false,
+        rateLimited: true,
+        status: 429,
+        message: errData?.message || 'Rate limit exceeded: Maximum 10 login attempts per hour.',
+      };
+    }
+
+    if (response.status === 403) {
+      const errData = await response.json().catch(() => null) as any;
+      return {
+        success: false,
+        forbidden: true,
+        status: 403,
+        message: errData?.message || 'Your PolarList account is pending approval by your administrator.',
+      };
+    }
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => null) as any;
+      return {
+        success: false,
+        status: response.status,
+        message: errData?.message || `PolarList authentication failed with status ${response.status}`,
+      };
+    }
+
+    const data = await response.json() as any;
+    return {
+      success: true,
+      data,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Failed to contact PolarList authentication service: ${err.message || 'Network error'}`,
+    };
+  }
+}
+
 export function signJwtToken(payload: {
   userId: number;
   email: string;
@@ -187,6 +275,7 @@ export function signJwtToken(payload: {
   companyName: string;
   roles?: string;
   designation?: string;
+  website?: string;
 }): string {
   const normMotherId = normalizeMotherId(payload.motherId);
   const normalizedEmail = payload.email.trim().toLowerCase();
@@ -205,12 +294,25 @@ export function signJwtToken(payload: {
     tv: 0,
     base_url: 'https://polardata.polarlist.in',
     roles: payload.roles || 'ROLE_USER,ROLE_ADMIN',
+    website: payload.website || 'https://ai.polarlist.in',
   };
   if (payload.designation) {
     claims.designation = payload.designation;
   }
 
   return jwt.sign(claims, getJwtSecret(), { expiresIn: '30d' });
+}
+
+/**
+ * Extract website claim from JWT token for future website verification
+ */
+export function getWebsiteFromJwt(token: string): string | null {
+  try {
+    const decoded = jwt.decode(token) as any;
+    return decoded?.website || null;
+  } catch {
+    return null;
+  }
 }
 
 export interface ResolvedTenant {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, QrCode, CheckCircle2, Building2, AlertCircle, Mail, KeyRound, ArrowLeft } from 'lucide-react'
+import { Loader2, QrCode, CheckCircle2, Mail, KeyRound, ArrowLeft, Sparkles } from 'lucide-react'
 import { apiFetch, setToken, UNAUTHORIZED_EVENT, type ApiError } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { FieldError } from '@/components/ui/field-error'
@@ -162,40 +162,30 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (emailError || passwordError) {
-      setAttempted(true)
+
+    // Reference legacy register variables to prevent unused warnings while UI is disabled
+    void qrCode; void verifyingQr; void verifiedCompany; void qrVerifyError;
+    void setupCode; void setSetupCode; void codeRequired; void setCodeRequired;
+    void handleQrChange; void verifyQrCode; void qrCodeError; void showQrError;
+
+    if (isRegister) {
+      toast.info('Please use your PolarList App: Go to Tool Hub and activate your account to start using Polar AI for free.', 6000)
+      setError('Please use your PolarList App: Go to Tool Hub and activate your account to start using Polar AI for free.')
       return
     }
 
-    if (isRegister) {
-      if (!qrCode.trim()) {
-        setAttempted(true)
-        return
-      }
-
-      // Strict enforcement: Must verify QR code before registration can proceed
-      let company = verifiedCompany
-      if (!company) {
-        setBusy(true)
-        company = await verifyQrCode(qrCode.trim())
-        if (!company) {
-          setBusy(false)
-          setAttempted(true)
-          return
-        }
-      }
+    if (emailError || passwordError) {
+      setAttempted(true)
+      return
     }
 
     setBusy(true)
     setError('')
     try {
       const payload: Record<string, string> = { email, password }
-      if (isRegister) {
-        payload.qrCode = qrCode.trim()
-      }
       if (setupCode) payload.setupCode = setupCode.trim()
 
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
+      const endpoint = '/api/auth/login'
       const res = await apiFetch<{ token: string; jwtToken?: string }>(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -222,7 +212,7 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
         <span className="inline-block size-2 rounded-full bg-foreground" />
         <span className="font-semibold tracking-tight text-sm">PolarAI</span>
         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary ms-auto">
-          Multi-Tenant
+          Your personal AI
         </span>
       </div>
 
@@ -231,114 +221,87 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
           <button
             type="button"
             onClick={() => { setActiveTab('login'); setError(''); setAttempted(false); }}
-            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
-              !isRegister
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${!isRegister
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
           >
             {t('auth.signIn')}
           </button>
           <button
             type="button"
             onClick={() => { setActiveTab('register'); setError(''); setAttempted(false); }}
-            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
-              isRegister
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+            className={`flex-1 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${isRegister
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
           >
             Register Company
           </button>
         </div>
 
         <h1 className="text-base font-semibold tracking-tight">
-          {isRegister ? 'Register with PolarList QR' : t('auth.signIn')}
+          {isRegister ? 'Activate Polar AI Account' : t('auth.signIn')}
         </h1>
         <p className="text-xs text-muted-foreground mt-1 mb-5">
           {isRegister
-            ? 'Scan or enter your PolarList QR key to link verified company identity and get a dedicated LLM gateway.'
-            : 'Sign in to access your tenant LLM gateway, API keys, and models.'}
+            ? 'Account registration is managed directly in your PolarList App.'
+            : 'Sign in using your PolarList credentials (email or username) to access Polar AI.'}
         </p>
+
+        {isRegister && (
+          <div className="p-3.5 rounded-2xl border border-primary/30 bg-primary/10 text-xs space-y-1.5 mb-5 animate-in fade-in">
+            <div className="font-semibold text-primary flex items-center gap-1.5 text-xs">
+              <Sparkles className="size-3.5 shrink-0" />
+              <span>Free Account Activation</span>
+            </div>
+            <p className="text-foreground/90 text-xs leading-relaxed">
+              Please use your <strong>PolarList App</strong>: Go to <strong>Tool Hub</strong> and activate your account to start using <strong>Polar AI for free</strong>.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={submit} className="space-y-3.5" noValidate>
           {isRegister && (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 opacity-60 pointer-events-none">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium flex items-center gap-1.5" htmlFor="auth-qr-code">
                   <QrCode className="size-3.5 text-primary" />
-                  PolarList QR / Scan Code <span className="text-destructive">*</span>
+                  PolarList QR / Scan Code (Managed in App)
                 </Label>
-                {verifiedCompany && (
-                  <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="size-3" /> Verified
-                  </span>
-                )}
               </div>
 
               <div className="flex gap-2">
                 <Input
                   id="auth-qr-code"
                   type="text"
+                  disabled={true}
                   value={qrCode}
-                  onChange={e => handleQrChange(e.target.value)}
-                  placeholder="Paste PLQR-... or registration link"
-                  className="font-mono text-xs"
-                  aria-invalid={showQrError}
+                  placeholder="Managed via PolarList App Tool Hub"
+                  className="font-mono text-xs bg-muted/50 cursor-not-allowed"
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => verifyQrCode()}
-                  disabled={verifyingQr || !qrCode.trim()}
-                  className="shrink-0 text-xs px-3 font-semibold"
-                >
-                  {verifyingQr ? <Loader2 className="size-3.5 animate-spin" /> : 'Verify'}
-                </Button>
               </div>
-
-              {attempted && qrCodeError && (
-                <FieldError id="auth-qr-error" error={qrCodeError} />
-              )}
-              {qrVerifyError && (
-                <p className="text-[11px] text-destructive mt-1 flex items-center gap-1">
-                  <AlertCircle className="size-3 shrink-0" />
-                  {qrVerifyError}
-                </p>
-              )}
-
-              {/* Verified Company Banner */}
-              {verifiedCompany && (
-                <div className="mt-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 text-xs space-y-0.5 animate-in fade-in">
-                  <div className="font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-                    <Building2 className="size-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span>{verifiedCompany.companyName}</span>
-                  </div>
-                  <div className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
-                    Mother ID: <span className="font-mono font-medium">{verifiedCompany.motherId}</span> • Active PolarList Tenant
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           <div className="space-y-1">
             <Label className="text-xs font-medium" htmlFor="auth-email">
-              {t('auth.email')} <span className="text-destructive">*</span>
+              {isRegister ? t('auth.email') : 'PolarList Email or Username'} <span className="text-destructive">*</span>
             </Label>
             <Input
               id="auth-email"
-              type="email"
+              type={isRegister ? 'email' : 'text'}
               autoComplete="username"
               autoFocus={!isRegister}
+              disabled={isRegister}
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder={t('auth.emailPlaceholder')}
+              placeholder={isRegister ? 'Managed via PolarList App' : 'Enter your email or username'}
               aria-invalid={showEmailError}
               aria-describedby={showEmailError ? 'auth-email-error' : undefined}
+              className={isRegister ? 'bg-muted/50 cursor-not-allowed' : ''}
             />
-            {attempted && <FieldError id="auth-email-error" error={emailError} />}
+            {attempted && !isRegister && <FieldError id="auth-email-error" error={emailError} />}
           </div>
 
           <div className="space-y-1">
@@ -348,30 +311,16 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
             <PasswordInput
               id="auth-password"
               autoComplete={isRegister ? 'new-password' : 'current-password'}
+              disabled={isRegister}
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder={isRegister ? t('auth.passwordPlaceholderSetup') : t('auth.passwordPlaceholderLogin')}
+              placeholder={isRegister ? 'Managed via PolarList App' : t('auth.passwordPlaceholderLogin')}
               aria-invalid={showPasswordError}
               aria-describedby={showPasswordError ? 'auth-password-error' : undefined}
+              className={isRegister ? 'bg-muted/50 cursor-not-allowed' : ''}
             />
-            {attempted && <FieldError id="auth-password-error" error={passwordError} />}
+            {attempted && !isRegister && <FieldError id="auth-password-error" error={passwordError} />}
           </div>
-
-          {isRegister && codeRequired && (
-            <div className="space-y-1">
-              <Label className="text-xs font-medium" htmlFor="auth-setup-code">{t('auth.setupCode')}</Label>
-              <Input
-                id="auth-setup-code"
-                type="text"
-                autoComplete="off"
-                value={setupCode}
-                onChange={e => setSetupCode(e.target.value)}
-                placeholder={t('auth.setupCodePlaceholder')}
-                aria-describedby="auth-setup-code-hint"
-              />
-              <p id="auth-setup-code-hint" className="text-xs text-muted-foreground">{t('auth.setupCodeHint')}</p>
-            </div>
-          )}
 
           {error && (
             <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -381,7 +330,9 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 
           <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
             {busy && <Loader2 className="animate-spin" aria-hidden />}
-            {busy ? (isRegister ? 'Registering Account...' : t('auth.signingIn')) : isRegister ? (verifiedCompany ? `Register for ${verifiedCompany.companyName}` : 'Verify QR & Register Company') : t('auth.signIn')}
+            {isRegister
+              ? 'Activate via PolarList App (Tool Hub)'
+              : (busy ? t('auth.signingIn') : t('auth.signIn'))}
           </Button>
         </form>
 
@@ -561,160 +512,177 @@ function ForgotPasswordForm({
           </div>
           <div>
             <h1 className="text-base font-semibold">{t('auth.forgotPassword')}</h1>
-            <p className="text-xs text-muted-foreground">
-              {step === 'request' ? 'Request a verification code' : 'Set a new password'}
-            </p>
+            <p className="text-xs text-muted-foreground">Manage password in PolarList App</p>
           </div>
         </div>
 
-        {step === 'request' && (
-          <form onSubmit={requestCode} className="space-y-4" noValidate>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Enter the email address registered with your account. We will send a unique 6-digit reset code to your inbox.
-            </p>
+        <div className="p-4 rounded-2xl border border-border/80 bg-muted/40 text-xs space-y-3 mb-5">
+          <p className="font-semibold text-foreground text-xs">
+            To reset or change your password:
+          </p>
+          <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground text-xs leading-relaxed">
+            <li>Open the <strong>PolarList App</strong> on your device or browser.</li>
+            <li>Go to <strong>Settings</strong> &gt; <strong>Change Password</strong>.</li>
+            <li>Enter your new password to update your account across PolarList and Polar AI.</li>
+          </ol>
+          <div className="pt-2 border-t border-border/50 text-[11px] text-muted-foreground">
+            Polar AI accounts are linked directly to your PolarList credentials.
+          </div>
+        </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium" htmlFor="forgot-email">
-                Account Email <span className="text-destructive">*</span>
-              </Label>
-              <div className="relative">
-                <Input
-                  id="forgot-email"
-                  type="email"
-                  autoComplete="email"
-                  autoFocus
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="name@company.com"
-                  aria-invalid={attempted && !!emailError}
-                  className="ps-9"
-                />
-                <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-              {attempted && <FieldError error={emailError} />}
-            </div>
+        <Button
+          type="button"
+          className="w-full h-10 text-xs font-semibold flex items-center justify-center gap-1.5"
+          onClick={onBack}
+        >
+          <ArrowLeft className="size-3.5" /> Back to Sign In
+        </Button>
 
-            {error && (
-              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {error}
-              </p>
+        {/* NOTE: Preserved legacy forgot/reset password flow below for future re-activation */}
+        {false && (
+          <div className="mt-4 pt-4 border-t border-border/50">
+            {step === 'request' && (
+              <form onSubmit={requestCode} className="space-y-4" noValidate>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Enter the email address registered with your account. We will send a unique 6-digit reset code to your inbox.
+                </p>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium" htmlFor="forgot-email">
+                    Account Email <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="forgot-email"
+                      type="email"
+                      autoComplete="email"
+                      autoFocus
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="name@company.com"
+                      aria-invalid={attempted && !!emailError}
+                      className="ps-9"
+                    />
+                    <Mail className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                  {attempted && <FieldError error={emailError} />}
+                </div>
+
+                {error && (
+                  <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
+
+                <Button type="submit" className="w-full h-10" disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
+                  {busy ? t('auth.requestingResetCode') : t('auth.requestResetCode')}
+                </Button>
+              </form>
             )}
 
-            <Button type="submit" className="w-full h-10" disabled={busy}>
-              {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
-              {busy ? t('auth.requestingResetCode') : t('auth.requestResetCode')}
-            </Button>
-          </form>
-        )}
+            {step === 'reset' && (
+              <form onSubmit={submitReset} className="space-y-3.5" noValidate>
+                <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs space-y-1">
+                  <p className="font-medium text-foreground flex items-center gap-1.5">
+                    <CheckCircle2 className="size-3.5 text-emerald-500" /> Reset code sent!
+                  </p>
+                  <p className="text-muted-foreground">
+                    We sent a 6-digit code to <strong className="text-foreground">{email}</strong>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setStep('request'); setError(''); setAttempted(false); }}
+                    className="text-[11px] text-primary hover:underline font-medium pt-1 block"
+                  >
+                    Change email address
+                  </button>
+                </div>
 
-        {step === 'reset' && (
-          <form onSubmit={submitReset} className="space-y-3.5" noValidate>
-            <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs space-y-1">
-              <p className="font-medium text-foreground flex items-center gap-1.5">
-                <CheckCircle2 className="size-3.5 text-emerald-500" /> Reset code sent!
-              </p>
-              <p className="text-muted-foreground">
-                We sent a 6-digit code to <strong className="text-foreground">{email}</strong>.
-              </p>
-              <button
-                type="button"
-                onClick={() => { setStep('request'); setError(''); setAttempted(false); }}
-                className="text-[11px] text-primary hover:underline font-medium pt-1 block"
-              >
-                Change email address
-              </button>
-            </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium" htmlFor="reset-code">
+                      6-Digit Verification Code <span className="text-destructive">*</span>
+                    </Label>
+                    <button
+                      type="button"
+                      disabled={busy || cooldown > 0}
+                      onClick={() => requestCode()}
+                      className="text-[11px] text-primary hover:underline disabled:opacity-50 disabled:no-underline font-medium"
+                    >
+                      {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+                    </button>
+                  </div>
+                  <Input
+                    id="reset-code"
+                    type="text"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    maxLength={6}
+                    value={resetCode}
+                    onChange={e => setResetCode(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))}
+                    placeholder="e.g. 582914"
+                    aria-invalid={attempted && !!codeError}
+                    className="font-mono text-base tracking-widest text-center h-10"
+                  />
+                  {attempted && <FieldError error={codeError} />}
+                </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium" htmlFor="reset-code">
-                  6-Digit Verification Code <span className="text-destructive">*</span>
-                </Label>
-                <button
-                  type="button"
-                  disabled={busy || cooldown > 0}
-                  onClick={() => requestCode()}
-                  className="text-[11px] text-primary hover:underline disabled:opacity-50 disabled:no-underline font-medium"
-                >
-                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
-                </button>
-              </div>
-              <Input
-                id="reset-code"
-                type="text"
-                autoComplete="one-time-code"
-                autoFocus
-                maxLength={6}
-                value={resetCode}
-                onChange={e => setResetCode(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))}
-                placeholder="e.g. 582914"
-                aria-invalid={attempted && !!codeError}
-                className="font-mono text-base tracking-widest text-center h-10"
-              />
-              {attempted && <FieldError error={codeError} />}
-            </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium" htmlFor="reset-new-password">
+                    {t('auth.newPassword')} <span className="text-destructive">*</span>
+                  </Label>
+                  <PasswordInput
+                    id="reset-new-password"
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder={t('auth.passwordPlaceholderSetup')}
+                    aria-invalid={attempted && !!passwordError}
+                  />
+                  {attempted && <FieldError error={passwordError} />}
+                </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium" htmlFor="reset-new-password">
-                {t('auth.newPassword')} <span className="text-destructive">*</span>
-              </Label>
-              <PasswordInput
-                id="reset-new-password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                placeholder={t('auth.passwordPlaceholderSetup')}
-                aria-invalid={attempted && !!passwordError}
-              />
-              {attempted && <FieldError error={passwordError} />}
-            </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium" htmlFor="reset-confirm-password">
+                    Confirm Password <span className="text-destructive">*</span>
+                  </Label>
+                  <PasswordInput
+                    id="reset-confirm-password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter your new password"
+                    aria-invalid={attempted && !!confirmError}
+                  />
+                  {attempted && <FieldError error={confirmError} />}
+                </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium" htmlFor="reset-confirm-password">
-                Confirm Password <span className="text-destructive">*</span>
-              </Label>
-              <PasswordInput
-                id="reset-confirm-password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={e => setConfirmPassword(e.target.value)}
-                placeholder="Re-enter your new password"
-                aria-invalid={attempted && !!confirmError}
-              />
-              {attempted && <FieldError error={confirmError} />}
-            </div>
+                {error && (
+                  <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
 
-            {error && (
-              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {error}
-              </p>
+                <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
+                  {busy ? 'Updating Password...' : 'Reset Password & Sign In'}
+                </Button>
+              </form>
             )}
 
-            <Button type="submit" className="w-full h-10 mt-1" disabled={busy}>
-              {busy ? <Loader2 className="animate-spin size-4 me-2" /> : null}
-              {busy ? 'Updating Password...' : 'Reset Password & Sign In'}
-            </Button>
-          </form>
-        )}
-
-        {step === 'done' && (
-          <div className="text-center py-4 space-y-3">
-            <CheckCircle2 className="size-10 text-emerald-500 mx-auto" />
-            <p className="text-sm font-medium text-foreground">{t('auth.passwordReset')}</p>
-            <p className="text-xs text-muted-foreground">Your password has been updated successfully.</p>
-            <Button onClick={onBack} className="w-full">
-              Proceed to Sign In
-            </Button>
+            {step === 'done' && (
+              <div className="text-center py-4 space-y-3">
+                <CheckCircle2 className="size-10 text-emerald-500 mx-auto" />
+                <p className="text-sm font-medium text-foreground">{t('auth.passwordReset')}</p>
+                <p className="text-xs text-muted-foreground">Your password has been updated successfully.</p>
+                <Button onClick={onBack} className="w-full">
+                  Proceed to Sign In
+                </Button>
+              </div>
+            )}
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-4 w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="size-3.5" /> {t('auth.backToLogin')}
-        </button>
       </div>
     </Centered>
   )
@@ -866,21 +834,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!desktopNeedsSession || !desktopSession || repairing.current || repairFailed) return
     repairing.current = true
-    ;(async () => {
-      try {
-        const token = await desktopSession()
-        if (!token) throw new Error('empty session token')
-        setToken(token)
-        queryClient.invalidateQueries()
-        const next = await refetch()
-        if (!next.data?.authenticated) setRepairFailed(true)
-      } catch (err) {
-        console.error('[auth-gate] desktop session repair failed', err)
-        setRepairFailed(true)
-      } finally {
-        repairing.current = false
-      }
-    })()
+      ; (async () => {
+        try {
+          const token = await desktopSession()
+          if (!token) throw new Error('empty session token')
+          setToken(token)
+          queryClient.invalidateQueries()
+          const next = await refetch()
+          if (!next.data?.authenticated) setRepairFailed(true)
+        } catch (err) {
+          console.error('[auth-gate] desktop session repair failed', err)
+          setRepairFailed(true)
+        } finally {
+          repairing.current = false
+        }
+      })()
   }, [desktopNeedsSession, desktopSession, repairFailed, queryClient, refetch])
 
   function onAuthed() {

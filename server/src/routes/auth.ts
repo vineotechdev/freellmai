@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 import {
   userCount,
   createUser,
+  upsertUserFromPolarLogin,
   verifyCredentials,
   createSession,
   validateSession,
@@ -16,7 +17,16 @@ import {
   normalizeEmail,
   desktopSessionToken,
 } from '../services/auth.js';
-import { signJwtToken, validatePolarQrCode, verifyPolarQrSecurityCheck, getTenantApiKey, getUserApiKey, normalizeMotherId } from '../services/tenant.js';
+import {
+  signJwtToken,
+  validatePolarQrCode,
+  verifyPolarQrSecurityCheck,
+  getTenantApiKey,
+  getUserApiKey,
+  normalizeMotherId,
+  authenticateWithPolarBackend,
+  getWebsiteFromJwt,
+} from '../services/tenant.js';
 import { persistUserToPostgres } from '../db/postgres.js';
 import { setupCodeMatches, clearSetupCode } from '../lib/setup-code.js';
 import {
@@ -444,14 +454,79 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
   }
 });
 
-authRouter.post('/login', (req: Request, res: Response) => {
+authRouter.post('/login', async (req: Request, res: Response) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
   const { email, password, motherId } = parsed.data;
+  const website = (req.body?.website as string | undefined) || 'https://ai.polarlist.in';
 
+  // 1. Authenticate with PolarList backend using same credentials
+  const polarResult = await authenticateWithPolarBackend(email, password, website);
+
+  if (polarResult.success && polarResult.data) {
+    const data = polarResult.data;
+    const normEmail = (data.email || email).trim().toLowerCase();
+    const motherIdStr = String(data.motherId || data.mother_id || 'default');
+    const compName = data.companyName || data.company_name || 'PolarList Company';
+
+    // Upsert user into local FreeLLM database so local sessions and permissions work seamlessly
+    const localUser = upsertUserFromPolarLogin({
+      email: normEmail,
+      motherId: motherIdStr,
+      companyName: compName,
+      password,
+    });
+
+    clearFailures(email);
+    const sessionToken = createSession(localUser.userId);
+    const jwtToken = data.jwtToken || data.token || signJwtToken({
+      userId: localUser.userId,
+      email: normEmail,
+      motherId: motherIdStr,
+      companyName: compName,
+      website: data.website || website,
+    });
+    const apiKey = getUserApiKey(localUser.userId, motherIdStr, compName);
+
+    res.json({
+      token: jwtToken,
+      jwtToken,
+      sessionToken,
+      email: normEmail,
+      motherId: motherIdStr,
+      companyName: compName,
+      apiKey,
+      website: data.website || website,
+    });
+    return;
+  }
+
+  // Handle rate limiting from PolarList backend (10 requests per hour)
+  if (polarResult.rateLimited) {
+    res.status(429).json({
+      error: {
+        message: polarResult.message || 'Too many login attempts. Please try again after 1 hour.',
+        type: 'rate_limit_error',
+      },
+    });
+    return;
+  }
+
+  // Handle account pending approval
+  if (polarResult.forbidden) {
+    res.status(403).json({
+      error: {
+        message: polarResult.message || 'Your PolarList account is pending approval by your administrator.',
+        type: 'account_inactive',
+      },
+    });
+    return;
+  }
+
+  // 2. Fallback to local authentication (for local admin / desktop sessions / standalone mode)
   if (isLockedOut(email)) {
     res.setHeader('Retry-After', String(lockoutRetryAfterSec(email)));
     res.status(429).json({ error: { message: 'Too many attempts. Wait 15 minutes or restart the app.', type: 'rate_limit_error' } });
@@ -461,7 +536,12 @@ authRouter.post('/login', (req: Request, res: Response) => {
   const user = verifyCredentials(email, password, motherId);
   if (!user) {
     recordFailure(email);
-    res.status(401).json({ error: { message: 'Invalid email or password', type: 'authentication_error' } });
+    res.status(401).json({
+      error: {
+        message: polarResult.message || 'Invalid username/email or password',
+        type: 'authentication_error',
+      },
+    });
     return;
   }
 
@@ -472,7 +552,10 @@ authRouter.post('/login', (req: Request, res: Response) => {
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
+    website,
   });
+  const apiKey = getUserApiKey(user.userId, user.motherId, user.companyName);
+
   res.json({
     token: jwtToken,
     jwtToken,
@@ -480,6 +563,8 @@ authRouter.post('/login', (req: Request, res: Response) => {
     email: user.email,
     motherId: user.motherId,
     companyName: user.companyName,
+    apiKey,
+    website,
   });
 });
 
