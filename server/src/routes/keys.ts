@@ -776,7 +776,7 @@ keysRouter.post('/:id/reveal', (req: Request, res: Response) => {
 });
 
 // Add a key
-keysRouter.post('/', (req: Request, res: Response) => {
+keysRouter.post('/', async (req: Request, res: Response) => {
   const parsed = addKeySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
@@ -858,19 +858,54 @@ keysRouter.post('/', (req: Request, res: Response) => {
   // #590: the proxy URL is encrypted like the key itself — it usually embeds
   // `user:pass@` credentials. Absent/'' stores NULLs = no override.
   const proxy = encryptProxyUrl(proxyUrl);
-  const result = db.prepare(`
-    INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
-    VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
-  `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
 
-  void persistApiKeyToPostgres({ id: Number(result.lastInsertRowid), platform, label: label ?? '', encrypted_key: encrypted, iv, auth_tag: authTag, status: 'unknown', enabled: 1, mother_id: motherId, user_id: userId });
+  let keyId: number | bigint | undefined = 0;
+  if (isPostgresConfigured()) {
+    const pgKeyId = await persistApiKeyToPostgres({
+      platform,
+      label: label ?? '',
+      encrypted_key: encrypted,
+      iv,
+      auth_tag: authTag,
+      status: 'unknown',
+      enabled: 1,
+      mother_id: motherId,
+      user_id: userId,
+    });
+    if (pgKeyId) {
+      keyId = pgKeyId;
+    }
+  }
+
+  if (keyId) {
+    db.prepare(`
+      INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
+      VALUES (?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        platform = excluded.platform,
+        label = excluded.label,
+        encrypted_key = excluded.encrypted_key,
+        iv = excluded.iv,
+        auth_tag = excluded.auth_tag,
+        status = excluded.status,
+        enabled = excluded.enabled,
+        mother_id = excluded.mother_id,
+        user_id = excluded.user_id
+    `).run(keyId, platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+  } else {
+    const result = db.prepare(`
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
+      VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
+    `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+    keyId = result.lastInsertRowid ?? 0;
+  }
 
   // #1348: fetch the provider's models in the background when the catalog
   // carries none for it. No-op for every other platform.
   triggerBuiltinModelDiscovery(db, platform, 'key_added');
 
   res.status(201).json({
-    id: result.lastInsertRowid,
+    id: keyId,
     platform,
     label: label ?? '',
     // Echoed back masked, never in the clear — the response body ends up in

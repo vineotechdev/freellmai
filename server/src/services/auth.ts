@@ -144,9 +144,6 @@ export function upsertUserFromPolarLogin(input: {
     let effectiveId = Number(existing.id);
     try {
       if (targetUserId && targetUserId !== effectiveId) {
-        db.prepare('UPDATE api_keys SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
-        db.prepare('UPDATE tenant_api_keys SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
-        db.prepare('UPDATE sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
         db.prepare('UPDATE users SET id = ? WHERE id = ?').run(targetUserId, effectiveId);
         effectiveId = targetUserId;
       }
@@ -276,9 +273,6 @@ export function validateSession(token: string | undefined | null): SessionUser |
         // Auto-provision or synchronize user record if token originated from PolarList backend
         if (user && parsedUserId && user.id !== parsedUserId) {
           try {
-            db.prepare('UPDATE api_keys SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
-            db.prepare('UPDATE tenant_api_keys SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
-            db.prepare('UPDATE sessions SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
             db.prepare('UPDATE users SET id = ? WHERE id = ?').run(parsedUserId, user.id);
             user.id = parsedUserId;
           } catch {}

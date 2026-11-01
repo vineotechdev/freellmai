@@ -526,21 +526,33 @@ export async function syncAllTablesToPostgres(db: Db): Promise<void> {
     }
 
     // 4. Sync api_keys to ai_api_keys
-    const apiKeys = db.prepare('SELECT platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id FROM api_keys').all() as any[];
+    const apiKeys = db.prepare('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id FROM api_keys').all() as any[];
     for (const k of apiKeys) {
-      const exists = await p.query('SELECT id FROM ai_api_keys WHERE platform = $1 AND encrypted_key = $2', [k.platform, k.encrypted_key]);
+      const exists = await p.query('SELECT id, user_id FROM ai_api_keys WHERE id = $1', [k.id]);
       if (exists.rows.length === 0) {
         await p.query(
-          `INSERT INTO ai_api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null]
+          `INSERT INTO ai_api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (id) DO UPDATE SET
+             platform = EXCLUDED.platform,
+             label = EXCLUDED.label,
+             status = EXCLUDED.status,
+             enabled = EXCLUDED.enabled`,
+          [k.id, k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null]
         );
       } else {
-        await p.query(
-          `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4, user_id = $5
-           WHERE platform = $6 AND encrypted_key = $7`,
-          [k.label, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null, k.platform, k.encrypted_key]
-        );
+        const existingRow = exists.rows[0];
+        // Only update if ownership matches; NEVER overwrite another user's key
+        const isOwner = k.user_id
+          ? Number(existingRow.user_id) === Number(k.user_id)
+          : (existingRow.mother_id === k.mother_id && !existingRow.user_id);
+        if (isOwner) {
+          await p.query(
+            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3
+             WHERE id = $4`,
+            [k.label, k.status, k.enabled, k.id]
+          );
+        }
       }
     }
 
@@ -634,50 +646,64 @@ export async function persistTenantKeyToPostgres(item: { user_id?: number | null
 
 /**
  * Persists an API key to PostgreSQL ai_api_keys immediately.
+ * Returns the assigned PostgreSQL key ID.
  */
-export async function persistApiKeyToPostgres(key: { id?: number; platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; mother_id?: string; user_id?: number | null }): Promise<void> {
+export async function persistApiKeyToPostgres(key: { id?: number; platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; mother_id?: string; user_id?: number | null }): Promise<number | null> {
   const p = getPostgresPool();
-  if (!p || !isInitialized) return;
+  if (!p || !isInitialized) return null;
 
   try {
-    const exists = key.id
-      ? await p.query('SELECT id FROM ai_api_keys WHERE id = $1', [key.id])
-      : await p.query('SELECT id FROM ai_api_keys WHERE platform = $1 AND encrypted_key = $2', [key.platform, key.encrypted_key]);
+    const userIdNum = key.user_id ? Number(key.user_id) : null;
+    const motherIdStr = key.mother_id || 'default';
 
-    if (exists.rows.length === 0) {
-      if (key.id) {
-        await p.query(
-          `INSERT INTO ai_api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           ON CONFLICT (id) DO UPDATE SET
-             platform = EXCLUDED.platform,
-             label = EXCLUDED.label,
-             encrypted_key = EXCLUDED.encrypted_key,
-             iv = EXCLUDED.iv,
-             auth_tag = EXCLUDED.auth_tag,
-             status = EXCLUDED.status,
-             enabled = EXCLUDED.enabled,
-             mother_id = EXCLUDED.mother_id,
-             user_id = EXCLUDED.user_id`,
-          [key.id, key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, key.mother_id || null, key.user_id ? Number(key.user_id) : null]
-        );
-      } else {
-        await p.query(
-          `INSERT INTO ai_api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, key.mother_id || null, key.user_id ? Number(key.user_id) : null]
-        );
+    // If an existing PostgreSQL key ID is provided, ONLY update if it actually belongs to this user/tenant!
+    if (key.id) {
+      const exists = await p.query('SELECT id, user_id, mother_id FROM ai_api_keys WHERE id = $1', [key.id]);
+      if (exists.rows.length > 0) {
+        const row = exists.rows[0];
+        const isOwner = userIdNum != null
+          ? Number(row.user_id) === userIdNum
+          : (row.mother_id === motherIdStr && row.user_id == null);
+
+        if (isOwner) {
+          await p.query(
+            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, last_checked_at = NOW()
+             WHERE id = $4`,
+            [key.label, key.status, key.enabled, key.id]
+          );
+          return key.id;
+        }
+        // If key.id belongs to someone else, NEVER overwrite it! Treat as a new key insertion.
       }
-    } else {
-      const targetId = exists.rows[0].id;
-      await p.query(
-        `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, mother_id = $4, user_id = $5
-         WHERE id = $6`,
-        [key.label, key.status, key.enabled, key.mother_id || null, key.user_id ? Number(key.user_id) : null, targetId]
-      );
     }
+
+    // Check if THIS user already has the exact same key for this platform
+    const duplicateQuery = userIdNum != null
+      ? await p.query('SELECT id FROM ai_api_keys WHERE platform = $1 AND user_id = $2 AND encrypted_key = $3', [key.platform, userIdNum, key.encrypted_key])
+      : await p.query('SELECT id FROM ai_api_keys WHERE platform = $1 AND mother_id = $2 AND user_id IS NULL AND encrypted_key = $3', [key.platform, motherIdStr, key.encrypted_key]);
+
+    if (duplicateQuery.rows.length > 0) {
+      const dupId = Number(duplicateQuery.rows[0].id);
+      await p.query(
+        `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, last_checked_at = NOW()
+         WHERE id = $4`,
+        [key.label, key.status, key.enabled, dupId]
+      );
+      return dupId;
+    }
+
+    // Insert as a brand-new key in PostgreSQL, returning the real PostgreSQL ID
+    const insertRes = await p.query(
+      `INSERT INTO ai_api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id`,
+      [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, motherIdStr, userIdNum]
+    );
+
+    return insertRes.rows.length > 0 ? Number(insertRes.rows[0].id) : null;
   } catch (err: any) {
     console.error('[PostgreSQL] Failed to persist api key:', err.message);
+    return null;
   }
 }
 
