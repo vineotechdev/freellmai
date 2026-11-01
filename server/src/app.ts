@@ -394,11 +394,14 @@ export function createApp(config?: Config) {
         next();
         return;
       }
-      // Same no-cache policy as the statically-served index.html: SPA deep
-      // links must revalidate so a redeploy propagates new asset URLs.
-      res.sendFile(path.join(clientDist, 'index.html'), {
-        headers: { 'Cache-Control': 'no-cache' },
-      });
+      const indexPath = path.join(clientDist, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath, {
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+      } else {
+        res.json({ service: 'PolarAI Gateway', status: 'online' });
+      }
     });
   }
 
