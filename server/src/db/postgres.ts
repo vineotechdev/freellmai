@@ -777,6 +777,24 @@ export async function persistSettingToPostgres(key: string, value: string): Prom
 }
 
 /**
+ * Persists an explicit session revocation / logout to PostgreSQL ai_sessions.
+ */
+export async function persistSessionRevocationToPostgres(tokenHash: string, userId = 1): Promise<void> {
+  const p = getPostgresPool();
+  if (!p || !isInitialized) return;
+  try {
+    await p.query(
+      `INSERT INTO ai_sessions (token_hash, user_id, expires_at_ms)
+       VALUES ($1, $2, 0)
+       ON CONFLICT (token_hash) DO UPDATE SET expires_at_ms = 0`,
+      [tokenHash, userId]
+    );
+  } catch (err: any) {
+    console.error('[PostgreSQL] Failed to persist session revocation:', err.message);
+  }
+}
+
+/**
  * Starts periodic sync pump between local state and PostgreSQL.
  */
 export function startPostgresSync(db: Db, intervalMs = 60000): void {

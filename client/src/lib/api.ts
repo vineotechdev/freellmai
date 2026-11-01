@@ -13,7 +13,14 @@ export function setToken(token: string): void {
   try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
 }
 export function clearToken(): void {
-  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('freellmapi_jwt');
+    localStorage.removeItem('freellmapi_mother_id');
+    localStorage.removeItem('freellmapi_company_name');
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem('freellmapi_jwt');
+  } catch { /* ignore */ }
 }
 
 export const UNAUTHORIZED_EVENT = 'freellmapi:unauthorized';
@@ -90,5 +97,12 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 export async function logout(): Promise<void> {
   try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
   clearToken();
+  try { sessionStorage.clear(); } catch { /* ignore */ }
   window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+
+  // Clean hard navigation to login / root
+  if (typeof window !== 'undefined') {
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+    window.location.href = `${base}/`;
+  }
 }

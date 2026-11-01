@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../db/index.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { getJwtSecret, getTenantApiKey, getUserApiKey, normalizeMotherId } from './tenant.js';
-import { persistUserToPostgres } from '../db/postgres.js';
+import { persistUserToPostgres, persistSessionRevocationToPostgres, isPostgresConfigured } from '../db/postgres.js';
 
 // Dashboard authentication: email + password accounts with JWT & session
 // tokens. Multi-tenant support with mother_id and company_name.
@@ -353,17 +353,20 @@ export function deleteSession(token: string | undefined | null): void {
   if (!token) return;
   const db = getDb();
   const tokenHash = sha256(token.trim());
+  let userId = 1;
   try {
     const defaultUser = db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number } | undefined;
-    if (defaultUser) {
-      db.prepare(`
-        INSERT INTO sessions (token_hash, user_id, expires_at_ms)
-        VALUES (?, ?, 0)
-        ON CONFLICT(token_hash) DO UPDATE SET expires_at_ms = 0
-      `).run(tokenHash, defaultUser.id);
-    }
+    if (defaultUser) userId = defaultUser.id;
+    db.prepare(`
+      INSERT INTO sessions (token_hash, user_id, expires_at_ms)
+      VALUES (?, ?, 0)
+      ON CONFLICT(token_hash) DO UPDATE SET expires_at_ms = 0
+    `).run(tokenHash, userId);
   } catch {
     // ignore
+  }
+  if (isPostgresConfigured()) {
+    void persistSessionRevocationToPostgres(tokenHash, userId);
   }
 }
 

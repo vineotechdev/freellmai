@@ -235,7 +235,7 @@ function AccountMenuItems({
             <KeyRound />
             {changePasswordLabel}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => logout()}>
+          <DropdownMenuItem onClick={async () => { await logout() }}>
             <LogOut />
             {signOutLabel}
           </DropdownMenuItem>
@@ -582,6 +582,9 @@ function App() {
                       <Route path="/premium" element={<PremiumPage />} />
                       <Route path="/test" element={<Navigate to="/playground" replace />} />
                       <Route path="/health" element={<Navigate to="/keys" replace />} />
+                      <Route path="/login" element={<Navigate to="/" replace />} />
+                      <Route path="/signin" element={<Navigate to="/" replace />} />
+                      <Route path="/logout" element={<Navigate to="/" replace />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Routes>
                   </PageBoundary>

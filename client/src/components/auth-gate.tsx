@@ -819,10 +819,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const { data, isLoading, isError, refetch } = useAuthStatus()
 
   useEffect(() => {
-    const handler = () => { refetch() }
+    const handler = () => {
+      queryClient.setQueryData(['auth-status'], {
+        needsSetup: false,
+        authenticated: false,
+        email: null,
+        motherId: null,
+        companyName: null,
+        desktop: false,
+      })
+      queryClient.clear()
+      void refetch()
+    }
     window.addEventListener(UNAUTHORIZED_EVENT, handler)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler)
-  }, [refetch])
+  }, [queryClient, refetch])
 
   // Desktop self-repair: one attempt at a time, and none after the shell has
   // handed back a session the server still rejects — a broken install shows a
