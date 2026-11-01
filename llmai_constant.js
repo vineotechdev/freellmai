@@ -29,6 +29,7 @@ function getPolarQrValidateUrl() {
   return 'https://polardata.polarlist.in/api/v1/auth/qr-code/validate';
 }
 
+
 module.exports = {
   getPolarAiLoginUrl,
   getPolarQrValidateUrl,
