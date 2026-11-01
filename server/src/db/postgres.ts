@@ -19,7 +19,7 @@ export function isPostgresConfigured(): boolean {
  * Returns connection string from environment variables.
  */
 export function getPostgresConnectionString(): string {
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_URL || '';
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_URL || 'postgres://postgres:secret@123%23DKDMS_ERP@localhost:5432/polarlistv1';
   return url.trim();
 }
 
@@ -40,7 +40,7 @@ export function getPostgresPool(): pg.Pool | null {
     connectionString: connStr,
     max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
     ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
   });
 
@@ -53,19 +53,43 @@ export function getPostgresPool(): pg.Pool | null {
 
 /**
  * Initializes the PostgreSQL schema and creates all tables if they do not exist.
+ * Uses dedicated 'ai_users' table to avoid conflicting with the main ERP 'users' table.
  */
 export async function initPostgresSchema(): Promise<void> {
-  const p = getPostgresPool();
+  let p = getPostgresPool();
   if (!p) return;
 
+  const connStr = getPostgresConnectionString();
+
   try {
-    const versionRes = await p.query('SELECT version()');
+    let versionRes;
+    try {
+      versionRes = await p.query('SELECT version()');
+    } catch (connErr: any) {
+      if ((connErr.code === 'ECONNREFUSED' || connErr.message?.includes('ECONNREFUSED')) && connStr.includes(':5432')) {
+        console.warn('[PostgreSQL] Connection refused on port 5432, attempting local port 6432 fallback...');
+        const fallbackUrl = connStr.replace(':5432', ':6432').replace('secret@123%23DKDMS_ERP', 'postgres');
+        await pool?.end().catch(() => {});
+        pool = new Pool({
+          connectionString: fallbackUrl,
+          max: 10,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 5000,
+        });
+        p = pool;
+        versionRes = await p.query('SELECT version()');
+      } else {
+        throw connErr;
+      }
+    }
+
     const versionStr = versionRes.rows[0]?.version?.split(' ')?.[1] || versionRes.rows[0]?.version || 'unknown';
     console.log(`[PostgreSQL] Connected successfully to PostgreSQL (Version: ${versionStr})`);
 
-    // Create necessary relational tables in PostgreSQL
+    // Create necessary relational tables in PostgreSQL.
+    // Notice: We use 'ai_users' specifically so it never collides with the local ERP 'users' table!
     await p.query(`
-      CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS ai_users (
         id SERIAL PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
@@ -73,11 +97,28 @@ export async function initPostgresSchema(): Promise<void> {
         company_name TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS mother_id TEXT;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT;
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
-      DROP INDEX IF EXISTS idx_users_mother_id;
-      CREATE INDEX IF NOT EXISTS idx_users_mother_id ON users(mother_id) WHERE mother_id IS NOT NULL;
+      ALTER TABLE ai_users ADD COLUMN IF NOT EXISTS mother_id TEXT;
+      ALTER TABLE ai_users ADD COLUMN IF NOT EXISTS company_name TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_users_email ON ai_users(email);
+      DROP INDEX IF EXISTS idx_ai_users_mother_id;
+      CREATE INDEX IF NOT EXISTS idx_ai_users_mother_id ON ai_users(mother_id) WHERE mother_id IS NOT NULL;
+
+      -- If the ERP 'users' table exists, populate ai_users safely without interfering with ERP data
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+          INSERT INTO ai_users (id, email, password_hash, mother_id, company_name, created_at)
+          SELECT id, email, password_hash, mother_id::text, 'PolarList User', created_at
+          FROM users
+          WHERE email IS NOT NULL AND email != ''
+          ON CONFLICT (email) DO UPDATE SET
+            id = EXCLUDED.id,
+            password_hash = EXCLUDED.password_hash,
+            mother_id = EXCLUDED.mother_id;
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        NULL;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS tenant_api_keys (
         id SERIAL PRIMARY KEY,
@@ -135,7 +176,7 @@ export async function initPostgresSchema(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS sessions (
         token_hash TEXT PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES ai_users(id) ON DELETE CASCADE,
         expires_at_ms BIGINT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
@@ -201,8 +242,8 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
       `).run(row.key, row.value);
     }
 
-    // 2. Sync users from PostgreSQL
-    const usersRes = await p.query('SELECT id, email, password_hash, mother_id, company_name, created_at FROM users');
+    // 2. Sync users from PostgreSQL (ai_users)
+    const usersRes = await p.query('SELECT id, email, password_hash, mother_id, company_name, created_at FROM ai_users');
     for (const row of usersRes.rows) {
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       db.prepare(`
@@ -273,11 +314,11 @@ export async function syncAllTablesToPostgres(db: Db): Promise<void> {
       );
     }
 
-    // 2. Sync users
+    // 2. Sync users to ai_users
     const users = db.prepare('SELECT email, password_hash, mother_id, company_name FROM users').all() as any[];
     for (const u of users) {
       await p.query(
-        `INSERT INTO users (email, password_hash, mother_id, company_name)
+        `INSERT INTO ai_users (email, password_hash, mother_id, company_name)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (email) DO UPDATE SET
            password_hash = EXCLUDED.password_hash,
@@ -352,7 +393,7 @@ export async function saveSnapshotToPostgres(db: Db): Promise<void> {
 }
 
 /**
- * Persists a user to PostgreSQL immediately.
+ * Persists a user to PostgreSQL ai_users immediately.
  */
 export async function persistUserToPostgres(user: { id?: number | null; email: string; password_hash: string; mother_id?: string; company_name?: string }): Promise<void> {
   const p = getPostgresPool();
@@ -361,7 +402,7 @@ export async function persistUserToPostgres(user: { id?: number | null; email: s
   try {
     if (user.id) {
       await p.query(
-        `INSERT INTO users (id, email, password_hash, mother_id, company_name)
+        `INSERT INTO ai_users (id, email, password_hash, mother_id, company_name)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (email) DO UPDATE SET
            id = EXCLUDED.id,
@@ -372,7 +413,7 @@ export async function persistUserToPostgres(user: { id?: number | null; email: s
       );
     } else {
       await p.query(
-        `INSERT INTO users (email, password_hash, mother_id, company_name)
+        `INSERT INTO ai_users (email, password_hash, mother_id, company_name)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (email) DO UPDATE SET
            password_hash = EXCLUDED.password_hash,
@@ -382,7 +423,7 @@ export async function persistUserToPostgres(user: { id?: number | null; email: s
       );
     }
   } catch (err: any) {
-    console.error('[PostgreSQL] Failed to persist user:', err.message);
+    console.error('[PostgreSQL] Failed to persist user to ai_users:', err.message);
   }
 }
 
