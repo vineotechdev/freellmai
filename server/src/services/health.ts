@@ -1,4 +1,5 @@
 import { getDb } from '../db/index.js';
+import { persistApiKeyStatusToPostgres, persistApiKeyEnabledToPostgres } from '../db/postgres.js';
 import { resolveProvider } from '../providers/index.js';
 import { BaseProvider } from '../providers/base.js';
 import { decrypt } from '../lib/crypto.js';
@@ -181,6 +182,7 @@ function recordInvalidFailure(keyId: number, platform?: string): void {
 
   if (count >= CONSECUTIVE_FAILURES_TO_DISABLE) {
     getDb().prepare('UPDATE api_keys SET enabled = 0 WHERE id = ?').run(keyId);
+    void persistApiKeyEnabledToPostgres(keyId, 0);
     // providerLog, not console.log: losing a key is the event an operator is
     // most likely to be looking for after the fact, so it goes to the dashboard
     // log viewer (where warn/error survive a restart) as well as to stdout —
@@ -313,6 +315,8 @@ export async function checkKeyHealth(keyId: number): Promise<KeyStatus> {
       ? "UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now'), last_healthy_at = datetime('now') WHERE id = ?"
       : "UPDATE api_keys SET status = ?, last_health_error = ?, last_checked_at = datetime('now') WHERE id = ?")
       .run(status, lastError, keyId);
+
+    void persistApiKeyStatusToPostgres(keyId, status, lastError, isValid);
 
     if (isValid) {
       failureCount.delete(keyId);
@@ -498,6 +502,8 @@ interface HealthKeyRow {
 }
 
 export interface HealthPassOptions {
+  /** Target checks to a specific user */
+  userId?: number;
   /** Probe every enabled key now: no recency skip, no per-provider spacing.
    *  Used by the dashboard's "check all" button and the post-wake re-probe,
    *  where the point is an immediate, complete picture. */
@@ -577,11 +583,17 @@ async function runHealthPass(opts: HealthPassOptions): Promise<HealthPassResult>
 
   // age_ms comes from the DB clock (last_checked_at is written as
   // datetime('now')); the injected `now` above only drives pacing.
-  const rows = db.prepare(`
-    SELECT id, platform, base_url, status,
-           CAST((julianday('now') - julianday(last_checked_at)) * 86400000 AS INTEGER) AS age_ms
-    FROM api_keys WHERE enabled = 1
-  `).all() as HealthKeyRow[];
+  const rows = (opts.userId
+    ? db.prepare(`
+        SELECT id, platform, base_url, status,
+               CAST((julianday('now') - julianday(last_checked_at)) * 86400000 AS INTEGER) AS age_ms
+        FROM api_keys WHERE enabled = 1 AND user_id = ?
+      `).all(opts.userId)
+    : db.prepare(`
+        SELECT id, platform, base_url, status,
+               CAST((julianday('now') - julianday(last_checked_at)) * 86400000 AS INTEGER) AS age_ms
+        FROM api_keys WHERE enabled = 1
+      `).all()) as HealthKeyRow[];
 
   const skippedKeyIds: number[] = [];
   const skipMs = opts.force ? 0 : getValidationRateLimitSkipMs();

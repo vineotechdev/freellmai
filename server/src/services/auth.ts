@@ -128,6 +128,7 @@ export function createUser(inputOrEmail: CreateUserInput | string, legacyPasswor
  */
 export function upsertUserFromPolarLogin(input: {
   email: string;
+  userId?: number | string;
   motherId?: string | number;
   companyName?: string;
   password?: string;
@@ -136,45 +137,54 @@ export function upsertUserFromPolarLogin(input: {
   const normalized = normalizeEmail(input.email);
   const normalizedMotherId = normalizeMotherId(String(input.motherId || 'default'));
   const compName = input.companyName ? input.companyName.trim() : 'PolarList Company';
+  const targetUserId = input.userId ? Number(input.userId) : null;
 
   const existing = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(normalized) as any;
   if (existing) {
+    let effectiveId = Number(existing.id);
     try {
+      if (targetUserId && targetUserId !== effectiveId) {
+        db.prepare('UPDATE api_keys SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
+        db.prepare('UPDATE tenant_api_keys SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
+        db.prepare('UPDATE sessions SET user_id = ? WHERE user_id = ?').run(targetUserId, effectiveId);
+        db.prepare('UPDATE users SET id = ? WHERE id = ?').run(targetUserId, effectiveId);
+        effectiveId = targetUserId;
+      }
       if (input.password) {
         const passHash = hashPassword(input.password);
         db.prepare('UPDATE users SET mother_id = ?, company_name = ?, password_hash = ? WHERE id = ?')
-          .run(normalizedMotherId, compName, passHash, existing.id);
+          .run(normalizedMotherId, compName, passHash, effectiveId);
       } else {
         db.prepare('UPDATE users SET mother_id = ?, company_name = ? WHERE id = ?')
-          .run(normalizedMotherId, compName, existing.id);
+          .run(normalizedMotherId, compName, effectiveId);
       }
     } catch {}
     getTenantApiKey(normalizedMotherId, compName);
-    return { userId: Number(existing.id), email: normalized, motherId: normalizedMotherId, companyName: compName };
+    void persistUserToPostgres({ id: effectiveId, email: normalized, password_hash: input.password ? hashPassword(input.password) : 'external_polar_auth', mother_id: normalizedMotherId, company_name: compName });
+    return { userId: effectiveId, email: normalized, motherId: normalizedMotherId, companyName: compName };
   }
 
   // Create new user in local SQLite DB
   const passHash = hashPassword(input.password || crypto.randomBytes(16).toString('hex'));
-  let result;
-  try {
-    result = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
-      .run(normalizedMotherId, compName, normalized, passHash);
-  } catch (err: any) {
+  let userId: number;
+  if (targetUserId) {
     try {
-      result = db.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
-        .run(normalized, passHash);
-    } catch (err2: any) {
-      const row = db.prepare('SELECT id FROM users WHERE email = ?').get(normalized) as any;
-      if (row) {
-        return { userId: Number(row.id), email: normalized, motherId: normalizedMotherId, companyName: compName };
-      }
-      throw err2;
+      db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)')
+        .run(targetUserId, normalizedMotherId, compName, normalized, passHash);
+      userId = targetUserId;
+    } catch {
+      const res = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
+        .run(normalizedMotherId, compName, normalized, passHash);
+      userId = Number(res.lastInsertRowid);
     }
+  } else {
+    const res = db.prepare('INSERT INTO users (mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?)')
+      .run(normalizedMotherId, compName, normalized, passHash);
+    userId = Number(res.lastInsertRowid);
   }
 
-  const userId = Number(result.lastInsertRowid);
   getTenantApiKey(normalizedMotherId, compName);
-  void persistUserToPostgres({ email: normalized, password_hash: passHash, mother_id: normalizedMotherId, company_name: compName });
+  void persistUserToPostgres({ id: userId, email: normalized, password_hash: passHash, mother_id: normalizedMotherId, company_name: compName });
   return { userId, email: normalized, motherId: normalizedMotherId, companyName: compName };
 }
 
@@ -260,14 +270,26 @@ export function validateSession(token: string | undefined | null): SessionUser |
           // ignore
         }
 
-        // Auto-provision user record if token originated from PolarList backend
+        let parsedUserId = decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId ? Number(decoded.userId) : null);
+        if (parsedUserId && isNaN(parsedUserId)) parsedUserId = null;
+
+        // Auto-provision or synchronize user record if token originated from PolarList backend
+        if (user && parsedUserId && user.id !== parsedUserId) {
+          try {
+            db.prepare('UPDATE api_keys SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
+            db.prepare('UPDATE tenant_api_keys SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
+            db.prepare('UPDATE sessions SET user_id = ? WHERE user_id = ?').run(parsedUserId, user.id);
+            db.prepare('UPDATE users SET id = ? WHERE id = ?').run(parsedUserId, user.id);
+            user.id = parsedUserId;
+          } catch {}
+        }
+
         if (!user) {
           const rawMotherId = decoded.mother_id || decoded.motherId || 'default';
           const motherId = normalizeMotherId(String(rawMotherId));
           const companyName = (decoded.companyName || decoded.company_name || 'PolarList User').trim();
-          let parsedUserId = decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId ? Number(decoded.userId) : null);
           try {
-            if (parsedUserId && !isNaN(parsedUserId)) {
+            if (parsedUserId) {
               db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)').run(
                 parsedUserId,
                 motherId,
@@ -290,13 +312,13 @@ export function validateSession(token: string | undefined | null): SessionUser |
           }
         }
 
-        const effectiveUserId = user ? user.id : (decoded.sub ? parseInt(decoded.sub, 10) : (decoded.userId || 1));
+        const effectiveUserId = user ? user.id : (parsedUserId || 1);
         const effectiveMotherId = (user && user.mother_id) || normalizeMotherId(String(decoded.mother_id || decoded.motherId || 'default'));
         const effectiveCompanyName = (user && user.company_name) || decoded.companyName || decoded.company_name || 'Default Company';
 
         try { getTenantApiKey(effectiveMotherId, effectiveCompanyName); } catch {}
         try { getUserApiKey(effectiveUserId, effectiveMotherId, effectiveCompanyName); } catch {}
-        void persistUserToPostgres({ email: normEmail, password_hash: 'external_jwt_auth', mother_id: effectiveMotherId, company_name: effectiveCompanyName });
+        void persistUserToPostgres({ id: effectiveUserId, email: normEmail, password_hash: 'external_jwt_auth', mother_id: effectiveMotherId, company_name: effectiveCompanyName });
 
         return {
           userId: effectiveUserId,

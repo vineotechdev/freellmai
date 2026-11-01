@@ -11,28 +11,55 @@ import type { Platform } from '@freellmapi/shared/types.js';
 export const healthRouter = Router();
 
 // Get health status for all platforms
-healthRouter.get('/', (_req: Request, res: Response) => {
+healthRouter.get('/', (req: Request, res: Response) => {
   const db = getDb();
+  const user = (req as any).user;
+  const userId = user?.userId;
+  const motherId = user?.motherId || 'default';
 
-  const platforms = db.prepare(`
-    SELECT
-      platform,
-      COUNT(*) as total_keys,
-      SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
-      SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
-      SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
-      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
-      SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
-      SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
-    FROM api_keys
-    GROUP BY platform
-  `).all() as any[];
+  const platforms = userId
+    ? db.prepare(`
+        SELECT
+          platform,
+          COUNT(*) as total_keys,
+          SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
+          SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
+          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
+          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
+          SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
+          SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
+        FROM api_keys
+        WHERE user_id = ?
+        GROUP BY platform
+      `).all(userId) as any[]
+    : db.prepare(`
+        SELECT
+          platform,
+          COUNT(*) as total_keys,
+          SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
+          SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
+          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
+          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
+          SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
+          SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
+        FROM api_keys
+        WHERE mother_id = ? AND user_id IS NULL
+        GROUP BY platform
+      `).all(motherId) as any[];
 
-  const keys = db.prepare(`
-    SELECT id, platform, label, status, enabled, created_at, last_checked_at, last_healthy_at, last_health_error
-    FROM api_keys
-    ORDER BY platform, created_at DESC
-  `).all() as any[];
+  const keys = userId
+    ? db.prepare(`
+        SELECT id, platform, label, status, enabled, created_at, last_checked_at, last_healthy_at, last_health_error
+        FROM api_keys
+        WHERE user_id = ?
+        ORDER BY platform, created_at DESC
+      `).all(userId) as any[]
+    : db.prepare(`
+        SELECT id, platform, label, status, enabled, created_at, last_checked_at, last_healthy_at, last_health_error
+        FROM api_keys
+        WHERE mother_id = ? AND user_id IS NULL
+        ORDER BY platform, created_at DESC
+      `).all(motherId) as any[];
 
   res.json({
     platforms: platforms.map(p => ({
@@ -57,7 +84,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
       lastHealthyAt: k.last_healthy_at ?? null,
       lastHealthError: k.last_health_error,
     })),
-    quotaStates: getQuotaStateForKeys(),
+    quotaStates: getQuotaStateForKeys({ userId }),
     degradation: getDegradationStatus(),
   });
 });
@@ -70,6 +97,17 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
     return;
   }
 
+  const user = (req as any).user;
+  const userId = user?.userId;
+  const motherId = user?.motherId || 'default';
+  const row = userId
+    ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(keyId, userId)
+    : getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(keyId, motherId);
+  if (!row) {
+    res.status(404).json({ error: { message: 'Key not found' } });
+    return;
+  }
+
   const status = await checkKeyHealth(keyId);
   res.json({ keyId, status });
 });
@@ -77,8 +115,10 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
 // Check all keys. Forced: someone pressed the button and wants an answer about
 // every key now, so the scheduled pass' recency skip and provider spacing (#553)
 // don't apply, and providers that must not be polled (#1599) are checked too.
-healthRouter.post('/check-all', async (_req: Request, res: Response) => {
-  await checkAllKeys({ force: true, manual: true });
+healthRouter.post('/check-all', async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const userId = user?.userId;
+  await checkAllKeys({ force: true, manual: true, userId });
   res.json({ success: true });
 });
 

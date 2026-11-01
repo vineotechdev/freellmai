@@ -1590,46 +1590,27 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   const provider = getProvider(entry.platform as Platform)!;
 
   let allKeys: KeyRow[] = [];
-  // 1. Highest priority: User-specific keys
+  // 1. Strict User-level keys (each user has their own separate keys irrespective of company)
   if (userId) {
     try {
       allKeys = db.prepare(
         "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ?"
       ).all(entry.platform, userId) as KeyRow[];
     } catch {}
-  }
-
-  // 2. Second priority: Tenant/company keys (where user_id is null or matches)
-  if (allKeys.length === 0 && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // 2. Company-level keys for requests without user context
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR user_id = ?)"
-      ).all(entry.platform, motherId, userId ?? 0) as KeyRow[];
-    } catch {
-      allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL"
       ).all(entry.platform, motherId) as KeyRow[];
-    }
-  }
-
-  // 3. Third priority: System default / unassigned keys
-  if (allKeys.length === 0 && (!motherId || motherId === 'all' || motherId.toLowerCase() === 'default')) {
+    } catch {}
+  } else {
+    // 3. System unassigned keys
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '') AND (user_id IS NULL OR user_id = ?)"
-      ).all(entry.platform, userId ?? 0) as KeyRow[];
-    } catch {
-      allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (LOWER(mother_id) = 'default' OR mother_id = 'all' OR mother_id IS NULL OR mother_id = '')"
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id IS NULL"
       ).all(entry.platform) as KeyRow[];
-    }
-  }
-
-  // 4. Last resort fallback for test harnesses without tenant context
-  if (allKeys.length === 0 && !userId && (!motherId || motherId === 'all')) {
-    allKeys = db.prepare(
-      "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
-    ).all(entry.platform) as KeyRow[];
+    } catch {}
   }
 
   if (allKeys.length === 0) {

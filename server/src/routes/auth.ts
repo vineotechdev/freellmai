@@ -473,8 +473,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const compName = data.companyName || data.company_name || 'PolarList Company';
 
     // Upsert user into local FreeLLM database so local sessions and permissions work seamlessly
+    const polarUserId = data.userId ? Number(data.userId) : undefined;
     const localUser = upsertUserFromPolarLogin({
       email: normEmail,
+      userId: polarUserId,
       motherId: motherIdStr,
       companyName: compName,
       password,

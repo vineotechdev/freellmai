@@ -4,7 +4,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import { getDb } from '../db/index.js';
-import { persistApiKeyToPostgres } from '../db/postgres.js';
+import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres } from '../db/postgres.js';
 import { resolveProvider, getAllProviders } from '../providers/index.js';
 import { OpenAICompatProvider, isAnonymousCredential } from '../providers/openai-compat.js';
 import { getSyncState } from '../services/catalog-sync.js';
@@ -401,12 +401,8 @@ keysRouter.get('/', (req: Request, res: Response) => {
   let rows: any[] = [];
   if (userId) {
     rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];
-    // If no user keys exist yet and mother_id is default, allow reading unassigned legacy keys
-    if (rows.length === 0 && motherId === 'default') {
-      rows = db.prepare('SELECT * FROM api_keys WHERE (user_id IS NULL OR user_id = ?) AND mother_id = ? ORDER BY created_at DESC').all(userId, motherId) as any[];
-    }
   } else {
-    rows = db.prepare('SELECT * FROM api_keys WHERE mother_id = ? ORDER BY created_at DESC').all(motherId) as any[];
+    rows = db.prepare('SELECT * FROM api_keys WHERE mother_id = ? AND user_id IS NULL ORDER BY created_at DESC').all(motherId) as any[];
   }
   const modelCounts = new Map<string, number>();
   const modelCountFor = (platform: string): number => {
@@ -856,7 +852,7 @@ keysRouter.post('/', (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
   `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
 
-  void persistApiKeyToPostgres({ platform, label: label ?? '', encrypted_key: encrypted, iv, auth_tag: authTag, status: 'unknown', enabled: 1, mother_id: motherId, user_id: userId });
+  void persistApiKeyToPostgres({ id: Number(result.lastInsertRowid), platform, label: label ?? '', encrypted_key: encrypted, iv, auth_tag: authTag, status: 'unknown', enabled: 1, mother_id: motherId, user_id: userId });
 
   // #1348: fetch the provider's models in the background when the catalog
   // carries none for it. No-op for every other platform.
@@ -1830,8 +1826,8 @@ keysRouter.delete('/:id', (req: Request, res: Response) => {
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
   const row = userId
-    ? db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND mother_id = ?))').get(id, userId, motherId) as { platform: string; base_url: string | null } | undefined
-    : db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND mother_id = ?').get(id, motherId) as { platform: string; base_url: string | null } | undefined;
+    ? db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId) as { platform: string; base_url: string | null } | undefined
+    : db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(id, motherId) as { platform: string; base_url: string | null } | undefined;
   if (!row) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -1846,10 +1842,12 @@ keysRouter.delete('/:id', (req: Request, res: Response) => {
         db.prepare(`UPDATE ${table} SET key_id = ? WHERE platform = 'custom' AND key_id = ?`).run(sibling, id);
       }
       db.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+      void deleteApiKeyFromPostgres(id);
       return;
     }
 
     db.prepare('DELETE FROM api_keys WHERE id = ?').run(id);
+    void deleteApiKeyFromPostgres(id);
     // Custom models exist only because POST /custom registered them alongside
     // their endpoint key (#117) — they can't route without it. Cascade away
     // the models bound to THIS endpoint (#212); other custom providers keep
@@ -1946,8 +1944,8 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   const motherId = user?.motherId || 'default';
   const db = getDb();
   const existingKey = userId
-    ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND mother_id = ?))').get(id, userId, motherId)
-    : db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ?').get(id, motherId);
+    ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId)
+    : db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(id, motherId);
   if (!existingKey) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -1966,9 +1964,9 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
 
   if (key !== undefined) {
     const stored = userId
-      ? db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND (user_id = ? OR (user_id IS NULL AND mother_id = ?))')
-          .get(id, userId, motherId) as { platform: string; encrypted_key: string; iv: string; auth_tag: string } | undefined
-      : db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND mother_id = ?')
+      ? db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND user_id = ?')
+          .get(id, userId) as { platform: string; encrypted_key: string; iv: string; auth_tag: string } | undefined
+      : db.prepare('SELECT platform, encrypted_key, iv, auth_tag FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL')
           .get(id, motherId) as { platform: string; encrypted_key: string; iv: string; auth_tag: string } | undefined;
     if (!stored) {
       res.status(404).json({ error: { message: 'Key not found' } });
@@ -2063,6 +2061,7 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     return;
   }
 
+  if (enabled !== undefined) void persistApiKeyEnabledToPostgres(id, enabled ? 1 : 0);
   if (changedKey !== undefined) clearCooldownsForKey(id);
 
   const response: Record<string, unknown> = { success: true };

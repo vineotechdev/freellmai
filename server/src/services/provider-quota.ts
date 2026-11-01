@@ -545,7 +545,7 @@ export function invalidateKeyQuotaHeadroom(platform?: Platform): void {
   else headroomCache.clear();
 }
 
-export function getQuotaStateForKeys(options: { normalizeExpired?: boolean } = {}): QuotaObservationView[] {
+export function getQuotaStateForKeys(options: { normalizeExpired?: boolean; userId?: number } = {}): QuotaObservationView[] {
   let db;
   try {
     db = getDb();
@@ -558,6 +558,8 @@ export function getQuotaStateForKeys(options: { normalizeExpired?: boolean } = {
   // (platform, key_id, quota_pool_key, metric, observed_at DESC, created_at
   // DESC) and stops at the first entry. The window-function form it replaces
   // ranked the entire table, raw_json included, on every dashboard poll.
+  const whereClause = options.userId ? 'WHERE k.user_id = ?' : '';
+  const params = options.userId ? [options.userId] : [];
   const rows = db.prepare(`
     SELECT
       pqs.platform,
@@ -596,8 +598,9 @@ export function getQuotaStateForKeys(options: { normalizeExpired?: boolean } = {
          ORDER BY o.observed_at DESC, o.created_at DESC
          LIMIT 1
       )
+    ${whereClause}
     ORDER BY pqs.platform ASC, pqs.key_id ASC, pqs.quota_pool_key ASC, pqs.metric ASC
-  `).all() as QuotaObservationView[];
+  `).all(...params) as QuotaObservationView[];
   if (options.normalizeExpired === false) return rows;
   // Legacy callers can still display replenished headroom, but never overwrite
   // the actual observation: the outlook must retain its age and reported value.
