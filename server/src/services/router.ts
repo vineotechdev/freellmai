@@ -1070,23 +1070,34 @@ interface ScoredEntry {
 // capacity. `monthlyUsedTokens` is already summed across all keys, so budget
 // must scale to match or the headroom guardrail damps a multi-key model to the
 // floor after just one account's worth of tokens.
-function usableKeyCountsByPlatform(db: Db): Map<string, number> {
+function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): Map<string, number> {
   // Per-request GROUP BY on api_keys; only changes on key writes. Real-time
   // correctness is backed by selectKeyForModel's live per-key checks — a stale
   // count can at worst walk one extra candidate, never route to a dead key.
-  // ponytail: 5s TTL instead of write-point invalidation; per-write hooks if that ever matters.
-  if (cachesEnabled() && keyCountsCache && keyCountsCache.db === db && Date.now() - keyCountsCache.at < KEY_COUNTS_TTL_MS) {
+  const scopeKey = `${userId ?? ''}:${motherId ?? ''}`;
+  if (cachesEnabled() && keyCountsCache && keyCountsCache.db === db && keyCountsCache.scope === scopeKey && Date.now() - keyCountsCache.at < KEY_COUNTS_TTL_MS) {
     return keyCountsCache.map;
   }
-  const rows = db.prepare(
-    "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') GROUP BY platform"
-  ).all() as { platform: string; count: number }[];
+  let rows: { platform: string; count: number }[] = [];
+  if (userId) {
+    rows = db.prepare(
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ? GROUP BY platform"
+    ).all(userId) as { platform: string; count: number }[];
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    rows = db.prepare(
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL GROUP BY platform"
+    ).all(motherId) as { platform: string; count: number }[];
+  } else {
+    rows = db.prepare(
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id IS NULL GROUP BY platform"
+    ).all() as { platform: string; count: number }[];
+  }
   const map = new Map(rows.map(r => [r.platform, r.count]));
-  keyCountsCache = { db, at: Date.now(), map };
+  keyCountsCache = { db, at: Date.now(), map, scope: scopeKey };
   return map;
 }
 const KEY_COUNTS_TTL_MS = 5_000;
-let keyCountsCache: { db: Db; at: number; map: Map<string, number> } | null = null;
+let keyCountsCache: { db: Db; at: number; map: Map<string, number>; scope: string } | null = null;
 
 function scoreChainEntry(
   entry: ChainRow,
@@ -1201,7 +1212,7 @@ export function applyReliabilityFloor(chain: ChainRow[]): ChainRow[] {
  * faithful reflection of the user's picked strategy, not a re-sampled draw each
  * request. Priority mode is deterministic either way.
  */
-function orderChain(chain: ChainRow[], strategy: RoutingStrategy, sampled = true, task?: 'code' | 'chat'): ChainRow[] {
+function orderChain(chain: ChainRow[], strategy: RoutingStrategy, sampled = true, task?: 'code' | 'chat', userId?: number, motherId?: string): ChainRow[] {
   // Tier first, always: it is the one ordering input that score must not be able
   // to override (see ChainRow.match_tier). Zero for every chain built anywhere
   // else, so this is a no-op outside slug-fallback resolution.
@@ -1260,7 +1271,7 @@ function orderChain(chain: ChainRow[], strategy: RoutingStrategy, sampled = true
   const composites = chain.map(e => intelligenceComposite(e.size_label, e.intelligence_rank));
   const intelMin = composites.length ? Math.min(...composites) : 0;
   const intelMax = composites.length ? Math.max(...composites) : 0;
-  const keyCounts = usableKeyCountsByPlatform(getDb());
+  const keyCounts = usableKeyCountsByPlatform(getDb(), userId, motherId);
   const headroomCfg = getHeadroomThresholds();
 
   return chain
@@ -1761,7 +1772,7 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
  * record the model-level hit when this returns false — i.e. the 429 exhausted the
  * model, not just one of its keys.
  */
-export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, skipKeys?: Set<string>): boolean {
+export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, skipKeys?: Set<string>, userId?: number, motherId?: string): boolean {
   const db = getDb();
   const m = db.prepare(`
     SELECT platform, model_id, rpm_limit, rpd_limit, tpm_limit, tpd_limit, key_id
@@ -1774,9 +1785,18 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
   if (!m) return false;
 
   const limits = { rpm: m.rpm_limit, rpd: m.rpd_limit, tpm: m.tpm_limit, tpd: m.tpd_limit };
-  const keys = db.prepare(
-    "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
-  ).all(m.platform) as { id: number; model_scope_json: string | null }[];
+  let keysQuery = "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')";
+  const params: any[] = [m.platform];
+  if (userId) {
+    keysQuery += " AND user_id = ?";
+    params.push(userId);
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL";
+    params.push(motherId);
+  } else {
+    keysQuery += " AND user_id IS NULL";
+  }
+  const keys = db.prepare(keysQuery).all(...params) as { id: number; model_scope_json: string | null }[];
 
   // Keys of the model's own custom endpoint (#212, #619); a key belonging to a
   // DIFFERENT endpoint cannot serve it, so it doesn't count as an alternative.
@@ -1817,9 +1837,9 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
  * model from an `exhausted` one (#1100), so the listing cannot claim a model
  * the router would immediately skip.
  */
-export function hasUsableKeyForModel(modelDbId: number): boolean {
+export function hasUsableKeyForModel(modelDbId: number, userId?: number, motherId?: string): boolean {
   // Key ids are AUTOINCREMENT and start at 1, so -1 excludes nothing.
-  return hasOtherUsableKey(modelDbId, -1);
+  return hasOtherUsableKey(modelDbId, -1, undefined, userId, motherId);
 }
 
 /**
@@ -2203,7 +2223,7 @@ export function routeRequest(
 
   const chain = (prefetchedChain ?? getActiveChain(db)).filter(e => e.enabled);
 
-  const sortedChain = orderChain(chain, strategy, true, task);
+  const sortedChain = orderChain(chain, strategy, true, task, userId, motherId);
 
   // Exploration toggle (#685/#707 follow-up): when enabled, give a model with
   // no reliability/speed samples a guaranteed chance to be tried, so it stops
@@ -2303,7 +2323,7 @@ export function routeRequest(
   // An explicit pin is exempt: the client named that model, so it still gets
   // walked and still reports "no enabled+healthy key for platform" against its
   // own label rather than vanishing into an aggregate.
-  const keyCounts = usableKeyCountsByPlatform(db);
+  const keyCounts = usableKeyCountsByPlatform(db, userId, motherId);
   const isRoutable = (e: ChainRow) =>
     e.model_db_id === preferredModelDbId || (keyCounts.get(e.platform) ?? 0) > 0;
   const routableChain = sortedChain.filter(isRoutable);
@@ -2446,7 +2466,7 @@ export interface RoutingScore {
   totalRequests: number; // decay-weighted observations
 }
 
-export function getRoutingScores(): { strategy: RoutingStrategy; keySelectionStrategy: KeySelectionStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; exploreEnabled: boolean; peakAdjusted: boolean; peakHours: PeakHoursConfig; scores: RoutingScore[] } {
+export function getRoutingScores(userId?: number, motherId?: string): { strategy: RoutingStrategy; keySelectionStrategy: KeySelectionStrategy; weights: RoutingWeights | null; customWeights: RoutingWeights; exploreEnabled: boolean; peakAdjusted: boolean; peakHours: PeakHoursConfig; scores: RoutingScore[] } {
   const db = getDb();
   const strategy = getRoutingStrategy();
   refreshStatsCache(db);
@@ -2480,7 +2500,7 @@ export function getRoutingScores(): { strategy: RoutingStrategy; keySelectionStr
   const composites = chain.map(e => intelligenceComposite(e.size_label, e.intelligence_rank));
   const intelMin = composites.length ? Math.min(...composites) : 0;
   const intelMax = composites.length ? Math.max(...composites) : 0;
-  const keyCounts = usableKeyCountsByPlatform(db);
+  const keyCounts = usableKeyCountsByPlatform(db, userId, motherId);
   const headroomCfg = getHeadroomThresholds();
 
   const scores: RoutingScore[] = chain.map(entry => {

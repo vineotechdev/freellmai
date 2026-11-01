@@ -8,6 +8,7 @@ import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js'
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
 import type { Db, DbFactory } from './types.js';
+import { isPostgresConfigured } from './postgres.js';
 
 export type { Db, DbFactory } from './types.js';
 
@@ -25,6 +26,12 @@ export function getDb(): Db {
 }
 
 export function getDefaultDbPath(): string {
+  // When PostgreSQL is configured, completely disable on-disk SQLite files.
+  // SQLite is kept solely as an ephemeral in-memory query and routing cache (:memory:),
+  // while PostgreSQL serves as the primary and permanent database.
+  if (isPostgresConfigured()) {
+    return ':memory:';
+  }
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     return '/tmp/freeapi.db';
   }
@@ -91,7 +98,11 @@ export function connectDb(
 
   if (!isMemory) restrictDbFilePermissions(resolvedPath);
 
-  console.log(`Database initialized at ${resolvedPath}`);
+  if (isMemory && isPostgresConfigured()) {
+    console.log('[Database] PostgreSQL is enabled. SQLite disk storage disabled — running in-memory cache synchronized with PostgreSQL.');
+  } else {
+    console.log(`Database initialized at ${resolvedPath}`);
+  }
   return db;
 }
 

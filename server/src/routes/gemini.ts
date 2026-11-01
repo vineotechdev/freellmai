@@ -81,8 +81,9 @@ function modelShape(model: NormalizedModel | null, autoContextWindow: number | n
 }
 
 geminiRouter.get('/models', (req, res) => {
-  if (!authenticate(req, res)) return;
-  const { models, autoContextWindow } = buildModelListing();
+  const auth = authenticate(req, res);
+  if (!auth) return;
+  const { models, autoContextWindow } = buildModelListing(auth.userId, auth.motherId);
   const availableOnly = String(req.query.available ?? '').toLowerCase();
   const listed = ['1', 'true', 'yes'].includes(availableOnly)
     ? models.filter(model => model.available === 1)
@@ -96,9 +97,10 @@ geminiRouter.get('/models', (req, res) => {
 });
 
 geminiRouter.get(/^\/models\/(.+)$/, (req, res) => {
-  if (!authenticate(req, res)) return;
+  const auth = authenticate(req, res);
+  if (!auth) return;
   const requested = decodeURIComponent(req.params[0]).replace(/^models\//, '');
-  const { models, autoContextWindow } = buildModelListing();
+  const { models, autoContextWindow } = buildModelListing(auth.userId, auth.motherId);
   if (requested === 'auto') {
     res.json(modelShape(null, autoContextWindow));
     return;

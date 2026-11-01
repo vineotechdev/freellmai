@@ -85,9 +85,9 @@ export async function createPasswordResetCode(email: string): Promise<{ success:
     try {
       const pool = getPostgresPool();
       if (pool) {
-        await pool.query('UPDATE password_reset_codes SET used = 1 WHERE email = $1 AND used = 0', [normalized]);
+        await pool.query('UPDATE ai_password_reset_codes SET used = 1 WHERE email = $1 AND used = 0', [normalized]);
         await pool.query(
-          'INSERT INTO password_reset_codes (email, code_hash, expires_at, used) VALUES ($1, $2, $3, 0)',
+          'INSERT INTO ai_password_reset_codes (email, code_hash, expires_at, used) VALUES ($1, $2, $3, 0)',
           [normalized, hashed, expiresAt]
         );
       }
@@ -139,7 +139,7 @@ export async function verifyPasswordResetCode(
       const pool = getPostgresPool();
       if (pool) {
         const pgRes = await pool.query(
-          'SELECT id, expires_at, used FROM password_reset_codes WHERE email = $1 AND code_hash = $2 AND used = 0 ORDER BY id DESC LIMIT 1',
+          'SELECT id, expires_at, used FROM ai_password_reset_codes WHERE email = $1 AND code_hash = $2 AND used = 0 ORDER BY id DESC LIMIT 1',
           [normalized, hashed]
         );
         if (pgRes.rows.length > 0) {
@@ -166,7 +166,7 @@ export async function verifyPasswordResetCode(
     try {
       const pool = getPostgresPool();
       if (pool) {
-        await pool.query('UPDATE password_reset_codes SET used = 1 WHERE email = $1 AND code_hash = $2', [normalized, hashed]);
+        await pool.query('UPDATE ai_password_reset_codes SET used = 1 WHERE email = $1 AND code_hash = $2', [normalized, hashed]);
       }
     } catch {}
   }

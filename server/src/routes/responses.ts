@@ -11,6 +11,7 @@ import type {
 } from '@freellmapi/shared/types.js';
 import { routeRequest, hasEnabledVisionModel, hasEnabledToolsModel, resolveStickyPreference, routingReserveTokens, resolveModelGroupCandidates, resolveRoutingChain, failureAttributionFor, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
 import { getDb } from '../db/index.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
 import { resolveAuth, prependSystemPrompt } from '../lib/system-prompt.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdForDispatch } from '../services/model-groups.js';
 import { contentToString, estimateInputTokens, messageHasImage } from '../lib/content.js';
@@ -684,6 +685,11 @@ export async function handleResponses(req: Request, res: Response): Promise<void
   if (!auth) {
     res.status(401).json({ error: { message: 'Invalid API key', type: 'authentication_error' } });
     return;
+  }
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), auth.userId, auth.motherId);
+    } catch {}
   }
 
   const parsed = responsesRequestSchema.safeParse(req.body);

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getDb } from '../db/index.js';
+import { syncApiKeysFromPostgres, isPostgresConfigured } from '../db/postgres.js';
 import { checkKeyHealth, checkAllKeys, pollKeyQuota, supportsQuotaPolling } from '../services/health.js';
 import { getDegradationStatus } from '../services/degradation.js';
 import { runModelProbePass } from '../services/model-probe.js';
@@ -11,11 +12,15 @@ import type { Platform } from '@freellmapi/shared/types.js';
 export const healthRouter = Router();
 
 // Get health status for all platforms
-healthRouter.get('/', (req: Request, res: Response) => {
+healthRouter.get('/', async (req: Request, res: Response) => {
   const db = getDb();
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
+
+  if (isPostgresConfigured()) {
+    await syncApiKeysFromPostgres(db, userId, motherId);
+  }
 
   const platforms = userId
     ? db.prepare(`
@@ -118,6 +123,10 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
 healthRouter.post('/check-all', async (req: Request, res: Response) => {
   const user = (req as any).user;
   const userId = user?.userId;
+  const motherId = user?.motherId || 'default';
+  if (isPostgresConfigured()) {
+    await syncApiKeysFromPostgres(getDb(), userId, motherId);
+  }
   await checkAllKeys({ force: true, manual: true, userId });
   res.json({ success: true });
 });

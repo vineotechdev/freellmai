@@ -10,7 +10,8 @@ import type {
   ChatContentBlock,
 } from '@freellmapi/shared/types.js';
 import { routeRequest, resolveModelGroupCandidates, resolveRoutingChain, resolveStickyPreference, routingReserveTokens, failureAttributionFor, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
-import { getSetting } from '../db/index.js';
+import { getSetting, getDb } from '../db/index.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { contentToString, estimateInputTokens } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
@@ -210,11 +211,16 @@ function newMessageId(): string {
 // before; a client-profile key (sk-cp-*) authenticates inference only and
 // carries its server-enforced system prompt. A disabled/unknown profile fails
 // like a bad key so a revoked client learns nothing extra.
-function authenticate(req: Request, res: Response): ResolvedAuth | null {
+async function authenticate(req: Request, res: Response): Promise<ResolvedAuth | null> {
   const auth = resolveAuth(extractApiToken(req));
   if (!auth) {
     sendError(res, 401, 'authentication_error', 'Invalid API key');
     return null;
+  }
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), auth.userId, auth.motherId);
+    } catch {}
   }
   return auth;
 }
@@ -465,7 +471,7 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
 
 export async function handleMessages(req: Request, res: Response): Promise<void> {
   const start = Date.now();
-  const auth = authenticate(req, res);
+  const auth = await authenticate(req, res);
   if (!auth) return;
 
   const parsed = messagesSchema.safeParse(req.body);
@@ -1178,8 +1184,8 @@ async function streamCompletion(
 
 // Anthropic token-counting endpoint. Claude Code calls this to size context
 // windows; we return a heuristic estimate (the proxy doesn't run a tokenizer).
-anthropicRouter.post('/messages/count_tokens', (req: Request, res: Response) => {
-  if (!authenticate(req, res)) return;
+anthropicRouter.post('/messages/count_tokens', async (req: Request, res: Response) => {
+  if (!(await authenticate(req, res))) return;
   const parsed = messagesSchema.safeParse(req.body);
   if (!parsed.success) {
     sendError(res, 400, 'invalid_request_error', 'Invalid request');
@@ -1217,11 +1223,12 @@ anthropicRouter.post('/messages/count_tokens', (req: Request, res: Response) => 
 //
 // Optional `claude/<real-id>` aliases let Claude Code's gateway picker discover
 // the full catalog; /messages strips the synthetic prefix before routing.
-anthropicRouter.get('/models', (req: Request, res: Response, next: NextFunction) => {
+anthropicRouter.get('/models', async (req: Request, res: Response, next: NextFunction) => {
   if (!req.headers['anthropic-version']) return next(); // OpenAI client → proxyRouter
-  if (!authenticate(req, res)) return;
+  const auth = await authenticate(req, res);
+  if (!auth) return;
 
-  const { models } = buildModelListing();
+  const { models } = buildModelListing(auth.userId, auth.motherId);
   const available = models.filter(m => m.available === 1);
   const aliasesEnabled = getSetting('expose_cc_discovery_aliases') === '1';
   const data = [

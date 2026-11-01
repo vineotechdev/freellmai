@@ -23,6 +23,8 @@ import { logRequest } from '../lib/request-log.js';
 import { withKeyProxy } from '../lib/proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { recordRequest, recordTokens } from '../services/ratelimit.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
+import type { SessionUser } from '../services/auth.js';
 
 export const modelsRouter = Router();
 
@@ -427,8 +429,17 @@ modelsRouter.post('/:id/test', async (req: Request, res: Response) => {
 });
 
 // List all models with availability info
-modelsRouter.get('/', (_req: Request, res: Response) => {
+modelsRouter.get('/', async (req: Request, res: Response) => {
   const db = getDb();
+  const user = (req as Request & { user?: SessionUser }).user;
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(db, user?.userId, user?.motherId);
+    } catch (e: any) {
+      console.warn('[models] Failed to sync keys from Postgres:', e.message);
+    }
+  }
+
   const activeProfileId = getActiveProfileId(db);
   const models = activeProfileId == null ? db.prepare(`
     SELECT m.*, fc.priority, fc.enabled as fallback_enabled,
@@ -453,12 +464,22 @@ modelsRouter.get('/', (_req: Request, res: Response) => {
   `).all(activeProfileId) as any[];
 
   // Count keys per platform
-  const keyCounts = db.prepare(`
+  let keyCountsQuery = `
     SELECT platform, COUNT(*) as count
     FROM api_keys
-    WHERE enabled = 1
-    GROUP BY platform
-  `).all() as { platform: string; count: number }[];
+    WHERE enabled = 1`;
+  const keyParams: any[] = [];
+  if (user?.userId) {
+    keyCountsQuery += ` AND user_id = ?`;
+    keyParams.push(user.userId);
+  } else if (user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL`;
+    keyParams.push(user.motherId);
+  } else {
+    keyCountsQuery += ` AND user_id IS NULL`;
+  }
+  keyCountsQuery += ` GROUP BY platform`;
+  const keyCounts = db.prepare(keyCountsQuery).all(...keyParams) as { platform: string; count: number }[];
 
   const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.count]));
 

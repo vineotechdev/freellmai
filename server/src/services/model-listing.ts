@@ -49,17 +49,24 @@ export interface ModelListing {
 // a second reading of api_keys.status: a live 429 never writes that column, it
 // writes a cooldown row (see services/ratelimit.ts, lib/fallback-loop.ts), so
 // status alone reports a cooling-down model as ready.
-function executionStatusFor(modelDbIds: number[], available: number): 'ready' | 'needsKey' | 'exhausted' {
+function executionStatusFor(modelDbIds: number[], available: number, userId?: number, motherId?: string): 'ready' | 'needsKey' | 'exhausted' {
   if (available !== 1) return 'needsKey';
-  return modelDbIds.some(id => hasUsableKeyForModel(id)) ? 'ready' : 'exhausted';
+  return modelDbIds.some(id => hasUsableKeyForModel(id, userId, motherId)) ? 'ready' : 'exhausted';
 }
 
-export function buildModelListing(): ModelListing {
+export function buildModelListing(userId?: number, motherId?: string): ModelListing {
+  let userKeyFilter = '';
+  if (userId) {
+    userKeyFilter = ` AND k.user_id = ${Number(userId)}`;
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND k.user_id IS NULL`;
+  }
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (
         SELECT 1 FROM api_keys k
         WHERE k.platform = m.platform
           AND k.enabled = 1
+          ${userKeyFilter}
           AND (m.key_id IS NULL OR k.id = m.key_id)
       ) THEN 1 ELSE 0 END)`;
   const db = getDb();
@@ -92,7 +99,7 @@ export function buildModelListing(): ModelListing {
         supportsTools: infos.some(i => i.supports_tools === 1),
         // A group is ready when ANY member can serve it — that is exactly the
         // choice the router has when it dispatches the group.
-        executionStatus: executionStatusFor(g.members.map(m => m.model_db_id), available),
+        executionStatus: executionStatusFor(g.members.map(m => m.model_db_id), available, userId, motherId),
       };
     });
   } else {
@@ -118,7 +125,7 @@ export function buildModelListing(): ModelListing {
       intel: m.intelligence_rank,
       platforms: [m.platform],
       supportsTools: m.supports_tools === 1,
-      executionStatus: executionStatusFor([m.id], m.available),
+      executionStatus: executionStatusFor([m.id], m.available, userId, motherId),
     }));
   }
 

@@ -6,6 +6,7 @@ import type {
   ChatToolDefinition,
 } from '@freellmapi/shared/types.js';
 import { getDb } from '../db/index.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
 import {
   routeRequest,
   resolveStickyPreference,
@@ -171,6 +172,11 @@ export async function runInboundChat(
   input: InboundChatRequest,
   wire: InboundChatWire,
 ): Promise<void> {
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), input.userId, input.motherId);
+    } catch {}
+  }
   const start = Date.now();
   // Downscale over-threshold inline images BEFORE estimation and routing so
   // token budgets, payload limits, and upstream transfers all see the shrunk

@@ -1,6 +1,6 @@
 import './env.js';
 import { createApp } from './app.js';
-import { initDb, getDb, initPostgres } from './db/index.js';
+import { initDb, getDb, initPostgres, isPostgresConfigured } from './db/index.js';
 import { startHealthChecker, checkAllKeys } from './services/health.js';
 import { restoreProxySettings, flushProxyCache } from './lib/proxy.js';
 import { startWakeDetect } from './lib/wake-detect.js';
@@ -40,12 +40,14 @@ async function main() {
 
   const scheduler = new NodeScheduler();
 
-  if (config.dbPath) {
-    await restoreDbBackupIfNeeded(config.dbPath);
-  } else {
-    await restoreDbBackupIfNeeded();
+  if (!isPostgresConfigured()) {
+    if (config.dbPath) {
+      await restoreDbBackupIfNeeded(config.dbPath);
+    } else {
+      await restoreDbBackupIfNeeded();
+    }
   }
-  const db = initDb(config.dbPath ?? undefined);
+  const db = initDb(isPostgresConfigured() ? ':memory:' : (config.dbPath ?? undefined));
   await initPostgres(db);
   applyDeclarativeConfigFromEnv();
   // After initDb: the unknown-model half of this check reads the catalog.
@@ -87,8 +89,10 @@ async function main() {
     startCatalogSync(scheduler);
     startCooldownProbe(scheduler);
     startModelProbe(scheduler);
-    startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
-    startBackupScheduler(scheduler);
+    if (!isPostgresConfigured()) {
+      startDbBackupPump(getDb(), scheduler, config.dbPath ?? undefined);
+      startBackupScheduler(scheduler);
+    }
     startCustomModelSync(getDb(), scheduler);
     startBuiltinModelDiscovery(getDb(), scheduler);
 

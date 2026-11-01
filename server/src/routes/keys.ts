@@ -4,7 +4,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import { getDb } from '../db/index.js';
-import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres } from '../db/postgres.js';
+import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres, syncApiKeysFromPostgres, isPostgresConfigured } from '../db/postgres.js';
 import { resolveProvider, getAllProviders } from '../providers/index.js';
 import { OpenAICompatProvider, isAnonymousCredential } from '../providers/openai-compat.js';
 import { getSyncState } from '../services/catalog-sync.js';
@@ -332,11 +332,17 @@ function noModelsNotice(platform: string): string | undefined {
 // missing without enumerating the whole list by hand. `custom` is excluded —
 // it's a per-key user-defined placeholder, not a fixed free-tier provider to
 // "check off".
-keysRouter.get('/providers', (req: Request, res: Response) => {
+keysRouter.get('/providers', async (req: Request, res: Response) => {
   const db = getDb();
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
+
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(db, userId, motherId);
+    } catch {}
+  }
   let countRows: Array<{ platform: string; total_keys: number; enabled_keys: number }> = [];
   if (userId) {
     countRows = db.prepare(`
@@ -393,11 +399,16 @@ keysRouter.get('/providers', (req: Request, res: Response) => {
 });
 
 // List all keys (masked) for this user/tenant
-keysRouter.get('/', (req: Request, res: Response) => {
+keysRouter.get('/', async (req: Request, res: Response) => {
   const db = getDb();
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
+
+  if (isPostgresConfigured()) {
+    await syncApiKeysFromPostgres(db, userId, motherId);
+  }
+
   let rows: any[] = [];
   if (userId) {
     rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];

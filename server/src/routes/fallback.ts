@@ -19,6 +19,8 @@ import { overriddenFieldNames } from '../services/model-state.js';
 import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 import { getQuotaOutlook } from '../services/quota-outlook.js';
 import { getDecisionRoutingStatus, setDecisionRoutingSettings } from '../services/routing-decision.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
+import type { SessionUser } from '../services/auth.js';
 
 export const fallbackRouter = Router();
 
@@ -31,8 +33,14 @@ fallbackRouter.get('/quota-forecast', (_req: Request, res: Response) => {
 // ── Bandit routing strategy ─────────────────────────────────────────────────
 // GET  /routing → active strategy, preset weights, and the per-model score
 //                 breakdown (reliability / speed / intelligence + guardrails).
-fallbackRouter.get('/routing', (_req: Request, res: Response) => {
-  const { peakHours, ...rest } = getRoutingScores();
+fallbackRouter.get('/routing', async (req: Request, res: Response) => {
+  const user = (req as Request & { user?: SessionUser }).user;
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), user?.userId, user?.motherId);
+    } catch {}
+  }
+  const { peakHours, ...rest } = getRoutingScores(user?.userId, user?.motherId);
   res.json({
     ...rest,
     peakHoursAdjust: peakHours.enabled,
@@ -226,8 +234,17 @@ function orderProfileRows(rows: any[]): any[] {
 }
 
 // Get fallback chain (with dynamic penalties)
-fallbackRouter.get('/', (req: Request, res: Response) => {
+fallbackRouter.get('/', async (req: Request, res: Response) => {
   const db = getDb();
+  const user = (req as Request & { user?: SessionUser }).user;
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(db, user?.userId, user?.motherId);
+    } catch (e: any) {
+      console.warn('[fallback] Failed to sync keys from Postgres:', e.message);
+    }
+  }
+
   // #1047: an explicit ?profile= pins the read to that chain, so a client
   // caching per-chain can never have "the active chain, whichever that is right
   // now" written into a specific chain's cache entry. During an activation the
@@ -255,11 +272,21 @@ fallbackRouter.get('/', (req: Request, res: Response) => {
   // Count usable keys per platform — enabled AND healthy/unknown status. Unified
   // with /token-usage and the routing scorer (#456) so budget pooling is computed
   // from the same key set everywhere (a disabled or invalid key adds no capacity).
-  const keyCounts = db.prepare(`
+  let keyCountsQuery = `
     SELECT platform, COUNT(*) as count
-    FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown')
-    GROUP BY platform
-  `).all() as { platform: string; count: number }[];
+    FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown')`;
+  const keyParams: any[] = [];
+  if (user?.userId) {
+    keyCountsQuery += ` AND user_id = ?`;
+    keyParams.push(user.userId);
+  } else if (user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL`;
+    keyParams.push(user.motherId);
+  } else {
+    keyCountsQuery += ` AND user_id IS NULL`;
+  }
+  keyCountsQuery += ` GROUP BY platform`;
+  const keyCounts = db.prepare(keyCountsQuery).all(...keyParams) as { platform: string; count: number }[];
   const keyCountMap = new Map(keyCounts.map(k => [k.platform, k.count]));
 
   // Get current dynamic penalties

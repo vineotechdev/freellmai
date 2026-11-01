@@ -13,6 +13,7 @@ import { retryAfterSeconds } from '../lib/retry-hint.js';
 import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, MediaError, MAX_TRANSCRIPTION_BYTES } from '../services/media.js';
 import multer from 'multer';
 import { getDb } from '../db/index.js';
+import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
 import { contentToString, estimateInputTokens, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { routeOutputBudget } from '../lib/output-cap.js';
@@ -67,11 +68,18 @@ export { timingSafeStringEqual } from '../lib/system-prompt.js';
 // (which may carry a server-enforced system prompt). Profile keys are ONLY
 // valid here — never on the /api dashboard surface. Writes the 401 itself so
 // call sites can simply bail on null.
-function requireInferenceAuth(req: Request, res: Response): ResolvedAuth | null {
+async function requireInferenceAuth(req: Request, res: Response): Promise<ResolvedAuth | null> {
   const auth = resolveAuth(extractApiToken(req));
   if (!auth) {
     res.status(401).json({ error: { message: 'Invalid API key', type: 'authentication_error' } });
     return null;
+  }
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), auth.userId, auth.motherId);
+    } catch (e: any) {
+      console.warn('[proxy] Failed to sync keys from Postgres:', e.message);
+    }
   }
   return auth;
 }
@@ -315,8 +323,9 @@ export function setStickyModel(messages: ChatMessage[], modelDbId: number, sessi
 
 // OpenAI-compatible /models endpoint (used by Hermes for metadata) 
 // shows API models which is linked by the user
-proxyRouter.get('/models', (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+proxyRouter.get('/models', async (req: Request, res: Response) => {
+  const auth = await requireInferenceAuth(req, res);
+  if (!auth) return;
 
   // By default we return the WHOLE catalog (one row per model id), each tagged
   // with whether it is currently usable, so a client can see everything and know
@@ -336,7 +345,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
 
   res.json({
     object: 'list',
-    data: buildCatalogEntries({ onlyAvailable, executionStatus: es }),
+    data: buildCatalogEntries({ onlyAvailable, executionStatus: es, userId: auth.userId, motherId: auth.motherId }),
   });
 });
 
@@ -350,8 +359,9 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
 // slashes (openrouter-style ids): the wildcard capture rejoins them, and a
 // URL-encoded %2F arrives decoded through Express's plain :id capture.
 const MODEL_RETRIEVE_MAX_ID_LEN = 300;
-proxyRouter.get(['/models/:id', '/models/*rest'], (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+proxyRouter.get(['/models/:id', '/models/*rest'], async (req: Request, res: Response) => {
+  const auth = await requireInferenceAuth(req, res);
+  if (!auth) return;
   // Express 5 hands a wildcard capture as a string array; a plain :id capture
   // as a string. Rejoin the segments so "vendor/ns/model" round-trips.
   const capture = (req.params as Record<string, unknown>).id
@@ -363,7 +373,7 @@ proxyRouter.get(['/models/:id', '/models/*rest'], (req: Request, res: Response) 
     });
     return;
   }
-  const entry = buildCatalogEntries().find(m => m.id === id);
+  const entry = buildCatalogEntries({ userId: auth.userId, motherId: auth.motherId }).find(m => m.id === id);
   if (!entry) {
     res.status(404).json({
       error: { message: `Model not found: ${id}`, type: 'invalid_request_error', code: 'model_not_found', param: 'id' },
@@ -384,8 +394,8 @@ proxyRouter.get(['/models/:id', '/models/*rest'], (req: Request, res: Response) 
 // The `?available=` / `?execution_status=` filters narrow only the catalog
 // rows — `auto`, `fusion` and the named chains are router entries, not models
 // with keys of their own.
-function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus?: NormalizedModel['executionStatus'] } = {}): Array<Record<string, unknown>> {
-  const { models: allListed, autoContextWindow } = buildModelListing();
+function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus?: NormalizedModel['executionStatus']; userId?: number; motherId?: string } = {}): Array<Record<string, unknown>> {
+  const { models: allListed, autoContextWindow } = buildModelListing(filters.userId, filters.motherId);
   const listed = filters.onlyAvailable ? allListed.filter(m => m.available === 1) : allListed;
 
   // Named fallback chains (#960/#895): every user-defined profile is exposed
@@ -541,7 +551,7 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
 // that sent them), so only the unified key may read it. A client-profile key
 // (sk-cp-...) is handed to a downstream client and must not see what every
 // other client spent.
-proxyRouter.get('/usage', (req: Request, res: Response) => {
+proxyRouter.get('/usage', async (req: Request, res: Response) => {
   // A URL-token request carries the injected unified key (routes/url-tokens.ts)
   // — which is precisely why it must not pass a unified-key gate. The token is
   // handed to a headerless client (a teammate, a widget, a phone app); the
@@ -551,7 +561,7 @@ proxyRouter.get('/usage', (req: Request, res: Response) => {
     res.status(403).json({ error: { message: 'Usage is only available to the unified API key', type: 'permission_error' } });
     return;
   }
-  const auth = requireInferenceAuth(req, res);
+  const auth = await requireInferenceAuth(req, res);
   if (!auth) return;
   if (auth.kind !== 'unified') {
     res.status(403).json({ error: { message: 'Usage is only available to the unified API key', type: 'permission_error' } });
@@ -827,7 +837,7 @@ const EmbeddingsBody = z.object({
 });
 
 proxyRouter.post('/embeddings', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = EmbeddingsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid request: `input` is required', type: 'invalid_request_error' } });
@@ -862,7 +872,7 @@ const RerankBody = z.object({
 });
 
 proxyRouter.post('/rerank', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = RerankBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid request: `query` and `documents` are required', type: 'invalid_request_error' } });
@@ -902,7 +912,7 @@ const SearchBody = z.object({
 });
 
 proxyRouter.post('/search', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = SearchBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid request: `query` is required', type: 'invalid_request_error' } });
@@ -945,8 +955,8 @@ proxyRouter.post('/search', async (req: Request, res: Response) => {
 });
 
 // The engines a caller can pin with `engine` on POST /v1/search.
-proxyRouter.get('/search/engines', (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+proxyRouter.get('/search/engines', async (req: Request, res: Response) => {
+  if (!(await requireInferenceAuth(req, res))) return;
   res.json({
     object: 'list',
     data: listSearchEngines()
@@ -982,7 +992,7 @@ const DecisionBody = z.object({
 });
 
 async function handleDecision(req: Request, res: Response): Promise<void> {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = DecisionBody.safeParse(req.body);
   if (!parsed.success) {
     const detail = parsed.error.errors.map(e => `${e.path.join('.') || 'body'}: ${e.message}`).join('; ');
@@ -1026,8 +1036,8 @@ proxyRouter.post('/decisions', handleDecision);
 proxyRouter.post('/systemone', handleDecision);
 
 // The decision models a caller can pin with `model` on POST /v1/decisions.
-proxyRouter.get('/decisions/models', (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+proxyRouter.get('/decisions/models', async (req: Request, res: Response) => {
+  if (!(await requireInferenceAuth(req, res))) return;
   res.json({
     object: 'list',
     data: listDecisionModels()
@@ -1072,7 +1082,7 @@ function mediaErrorType(status: number): string {
 }
 
 proxyRouter.post('/images/generations', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = ImageBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid request: `prompt` is required', type: 'invalid_request_error' } });
@@ -1110,7 +1120,7 @@ const VideoBody = z.object({
 });
 
 proxyRouter.post('/videos/generations', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = VideoBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -1166,7 +1176,7 @@ const SpeechBody = z.object({
 });
 
 proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   const parsed = SpeechBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: { message: 'Invalid request: `input` is required', type: 'invalid_request_error' } });
@@ -1214,10 +1224,10 @@ function transcriptionBadRequest(res: Response, message: string, code?: string):
   res.status(400).json({ error: { message, type: 'invalid_request_error', ...(code ? { code } : {}) } });
 }
 
-proxyRouter.post('/audio/transcriptions', (req: Request, res: Response, next) => {
+proxyRouter.post('/audio/transcriptions', async (req: Request, res: Response, next) => {
   // Auth before the multipart body is parsed: an unauthenticated caller's
   // upload is never buffered.
-  if (!requireInferenceAuth(req, res)) return;
+  if (!(await requireInferenceAuth(req, res))) return;
   transcriptionUpload.single('file')(req, res, (err: unknown) => {
     if (err) {
       if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
@@ -1383,7 +1393,7 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
   const requestGroupId = getRequestGroupId(req);
   res.setHeader('X-Request-ID', requestGroupId);
 
-  const auth = requireInferenceAuth(req, res);
+  const auth = await requireInferenceAuth(req, res);
   if (!auth) return;
 
   const parsed = CompletionBody.safeParse(req.body);
@@ -1839,7 +1849,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // pages can reach localhost, so socket locality is not a reliable
   // authorization boundary. Client-profile keys resolve here too, carrying
   // their server-enforced system prompt (#411).
-  const auth = requireInferenceAuth(req, res);
+  const auth = await requireInferenceAuth(req, res);
   if (!auth) return;
 
   // Validate request
