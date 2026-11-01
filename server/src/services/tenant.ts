@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { timingSafeStringEqual } from '../lib/system-prompt.js';
-import { LLMAI_CONSTANTS } from '../constants/llmai_constant.js';
+import { LLMAI_CONSTANTS, getPolarAiLoginUrl, getPolarQrValidateUrl } from '../constants/llmai_constant.js';
 import { persistTenantKeyToPostgres } from '../db/postgres.js';
 
 export interface PolarQrValidationResult {
@@ -52,7 +52,7 @@ export async function validatePolarQrCode(rawCode: string): Promise<PolarQrValid
     };
   }
 
-  const endpointUrl = LLMAI_CONSTANTS.POLAR_QR_VALIDATE_URL;
+  const endpointUrl = getPolarQrValidateUrl();
   const url = new URL(endpointUrl);
   url.searchParams.set('code', code);
 
@@ -187,10 +187,15 @@ export interface PolarAuthResult {
   status?: number;
   message?: string;
   data?: {
+    ok?: boolean;
+    verified?: boolean;
+    authenticated?: boolean;
     token: string;
     jwtToken?: string;
     accessToken?: string;
     refreshToken?: string;
+    firebaseCustomToken?: string | null;
+    firebaseUid?: string | null;
     userId: number;
     email: string;
     motherId: string | number;
@@ -198,6 +203,8 @@ export interface PolarAuthResult {
     companyName: string;
     company_name?: string;
     displayName?: string;
+    role?: string;
+    designation?: string;
     website?: string;
     apiKey?: string;
   };
@@ -212,7 +219,7 @@ export async function authenticateWithPolarBackend(
   password: string,
   website: string = 'https://ai.polarlist.in'
 ): Promise<PolarAuthResult> {
-  const url = LLMAI_CONSTANTS.POLAR_AI_LOGIN_URL;
+  const url = getPolarAiLoginUrl();
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -232,7 +239,7 @@ export async function authenticateWithPolarBackend(
         success: false,
         rateLimited: true,
         status: 429,
-        message: errData?.message || 'Rate limit exceeded: Maximum 10 login attempts per hour.',
+        message: errData?.message || 'Rate limit exceeded: Maximum 10 login attempts per hour on PolarList backend.',
       };
     }
 
@@ -246,6 +253,15 @@ export async function authenticateWithPolarBackend(
       };
     }
 
+    if (response.status === 404) {
+      const errData = await response.json().catch(() => null) as any;
+      return {
+        success: false,
+        status: 404,
+        message: errData?.message || `PolarList AI login endpoint not found at ${url}. Please configure POLAR_JAVA_BACKEND_URL in your .env or verify your backend is running.`,
+      };
+    }
+
     if (!response.ok) {
       const errData = await response.json().catch(() => null) as any;
       return {
@@ -256,6 +272,24 @@ export async function authenticateWithPolarBackend(
     }
 
     const data = await response.json() as any;
+    // Verify that the response contains positive verification flags or tokens
+    const isVerified = Boolean(
+      data?.verified === true ||
+      data?.ok === true ||
+      data?.success === true ||
+      data?.authenticated === true ||
+      data?.token ||
+      data?.jwtToken ||
+      data?.userId
+    );
+
+    if (!isVerified) {
+      return {
+        success: false,
+        message: data?.message || 'PolarList verification failed. User credentials could not be verified.',
+      };
+    }
+
     return {
       success: true,
       data,
@@ -263,7 +297,7 @@ export async function authenticateWithPolarBackend(
   } catch (err: any) {
     return {
       success: false,
-      message: `Failed to contact PolarList authentication service: ${err.message || 'Network error'}`,
+      message: `Failed to contact PolarList authentication service at ${url}: ${err.message || 'Connection error'}. Verify POLAR_JAVA_BACKEND_URL.`,
     };
   }
 }
