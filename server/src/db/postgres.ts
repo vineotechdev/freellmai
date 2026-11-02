@@ -182,6 +182,26 @@ export async function initPostgresSchema(): Promise<void> {
       ALTER TABLE ai_tenant_api_keys DROP CONSTRAINT IF EXISTS ai_tenant_api_keys_mother_id_key;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_tenant_api_keys_user_id ON ai_tenant_api_keys(user_id) WHERE user_id IS NOT NULL;
 
+      CREATE TABLE IF NOT EXISTS ai_tenant_details (
+        mother_id TEXT PRIMARY KEY,
+        company_name TEXT,
+        universal_keys BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_tenant_details_mother_id ON ai_tenant_details(mother_id);
+
+      -- Auto-populate ai_tenant_details from ai_tenant_api_keys if empty or new
+      INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys)
+      SELECT DISTINCT ON (LOWER(mother_id)) mother_id, company_name, universal_keys
+      FROM ai_tenant_api_keys
+      WHERE mother_id IS NOT NULL AND mother_id != ''
+      ORDER BY LOWER(mother_id), universal_keys DESC
+      ON CONFLICT (mother_id) DO UPDATE SET
+        company_name = EXCLUDED.company_name,
+        universal_keys = EXCLUDED.universal_keys,
+        updated_at = NOW();
+
       CREATE TABLE IF NOT EXISTS ai_api_keys (
         id SERIAL PRIMARY KEY,
         platform TEXT NOT NULL,
@@ -387,6 +407,35 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
       `).run(row.user_id ? Number(row.user_id) : null, row.mother_id, row.api_key, row.company_name || 'Default Company', univFlag, createdAtStr);
     }
 
+    // 3b. Sync ai_tenant_details from PostgreSQL
+    try {
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS ai_tenant_details (
+          mother_id TEXT PRIMARY KEY,
+          company_name TEXT,
+          universal_keys INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `).run();
+      const tenantDetailsRes = await p.query('SELECT mother_id, company_name, universal_keys, created_at, updated_at FROM ai_tenant_details');
+      for (const row of tenantDetailsRes.rows) {
+        const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
+        const updatedAtStr = row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at ? String(row.updated_at) : null);
+        const univFlag = (row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true') ? 1 : 0;
+        db.prepare(`
+          INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, created_at, updated_at)
+          VALUES (?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))
+          ON CONFLICT(mother_id) DO UPDATE SET
+            company_name = excluded.company_name,
+            universal_keys = excluded.universal_keys,
+            updated_at = excluded.updated_at
+        `).run(row.mother_id, row.company_name || 'Default Company', univFlag, createdAtStr, updatedAtStr);
+      }
+    } catch (tdErr: any) {
+      console.warn('[PostgreSQL] Could not sync ai_tenant_details:', tdErr.message);
+    }
+
     // 4. Sync api_keys from PostgreSQL (ai_api_keys)
     const keysRes = await p.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, is_universal, last_healthy_at, last_health_error, created_at FROM ai_api_keys');
     for (const row of keysRes.rows) {
@@ -433,16 +482,25 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
     let isUniv = false;
     if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
-        const sRow = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) AND universal_keys = 1 LIMIT 1').get(motherId) as any;
-        if (sRow) {
-          isUniv = true;
+        // Query PostgreSQL ai_tenant_details for central mother_id universal setting
+        const tdRow = await p.query('SELECT universal_keys, company_name FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER($1) LIMIT 1', [motherId]);
+        if (tdRow.rows.length > 0) {
+          isUniv = tdRow.rows[0].universal_keys === true || tdRow.rows[0].universal_keys === 1 || String(tdRow.rows[0].universal_keys) === 'true';
+          try {
+            db.prepare(`
+              INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, updated_at)
+              VALUES (?, ?, ?, datetime('now'))
+              ON CONFLICT(mother_id) DO UPDATE SET
+                universal_keys = excluded.universal_keys,
+                company_name = COALESCE(excluded.company_name, ai_tenant_details.company_name),
+                updated_at = datetime('now')
+            `).run(motherId, tdRow.rows[0].company_name || null, isUniv ? 1 : 0);
+          } catch {}
         } else {
-          const pRow = await p.query('SELECT universal_keys FROM ai_tenant_api_keys WHERE LOWER(mother_id) = LOWER($1) AND universal_keys = TRUE LIMIT 1', [motherId]);
-          if (pRow.rows.length > 0) {
-            isUniv = true;
-            try {
-              db.prepare('UPDATE tenant_api_keys SET universal_keys = 1 WHERE LOWER(mother_id) = LOWER(?)').run(motherId);
-            } catch {}
+          // Fallback to SQLite check
+          const sRow = db.prepare('SELECT universal_keys FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(motherId) as any;
+          if (sRow) {
+            isUniv = sRow.universal_keys === 1 || sRow.universal_keys === true || String(sRow.universal_keys) === 'true';
           }
         }
       } catch {}

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
+import type { Db } from '../db/types.js';
 import { timingSafeStringEqual } from '../lib/system-prompt.js';
 import { LLMAI_CONSTANTS, getPolarAiLoginUrl, getPolarQrValidateUrl } from '../constants/llmai_constant.js';
 import { persistTenantKeyToPostgres, getPostgresPool } from '../db/postgres.js';
@@ -510,16 +511,53 @@ export function regenerateTenantApiKey(motherId: string, companyName: string = '
   return generatedKey;
 }
 
+export interface TenantDetails {
+  motherId: string;
+  companyName: string | null;
+  universalKeys: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+function ensureTenantDetailsTable(db: Db): void {
+  try {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS ai_tenant_details (
+        mother_id TEXT PRIMARY KEY,
+        company_name TEXT,
+        universal_keys INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `).run();
+  } catch {}
+}
+
 /**
  * Checks whether universal API keys are enabled for a company (mother_id).
- * When enabled, API keys belonging to this company are shared among all users of that company.
- * When disabled, each user has their own separate private keys.
+ * The central mother_id setting in ai_tenant_details OVERRIDES individual user/key settings:
+ * When enabled, all API keys belonging to this company are shared and pooled among all users.
+ * When disabled, users load their own private keys (plus any single key explicitly flagged universal).
  */
 export function isCompanyUniversalKeys(motherId: string): boolean {
   if (!motherId) return false;
   const normId = normalizeMotherId(motherId);
   const db = getDb();
+  ensureTenantDetailsTable(db);
 
+  // 1. Primary check: ai_tenant_details table (Mother ID settings override individual settings!)
+  try {
+    const row = db.prepare('SELECT universal_keys FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as { universal_keys: number | boolean } | undefined;
+    if (row && (row.universal_keys === 1 || row.universal_keys === true || String(row.universal_keys) === 'true')) {
+      return true;
+    }
+    if (row && (row.universal_keys === 0 || row.universal_keys === false || String(row.universal_keys) === 'false')) {
+      // Explicitly configured in ai_tenant_details
+      return false;
+    }
+  } catch {}
+
+  // 2. Secondary check: tenant_api_keys
   try {
     const row = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) AND universal_keys = 1 LIMIT 1').get(normId) as { universal_keys: number } | undefined;
     if (row && Number(row.universal_keys) === 1) {
@@ -527,7 +565,7 @@ export function isCompanyUniversalKeys(motherId: string): boolean {
     }
   } catch {}
 
-  // Fallback to settings table
+  // 3. Fallback to settings table
   try {
     const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`universal_keys_${normId}`) as { value: string } | undefined;
     if (settingRow && (settingRow.value === 'true' || settingRow.value === '1')) {
@@ -539,20 +577,52 @@ export function isCompanyUniversalKeys(motherId: string): boolean {
 }
 
 /**
- * Updates universal API keys policy for a company across SQLite and PostgreSQL.
+ * Retrieves company tenant details from ai_tenant_details table.
  */
-export async function setCompanyUniversalKeys(motherId: string, enabled: boolean): Promise<void> {
+export function getCompanyTenantDetails(motherId: string): TenantDetails | null {
+  if (!motherId) return null;
   const normId = normalizeMotherId(motherId);
   const db = getDb();
+  ensureTenantDetailsTable(db);
+  try {
+    const row = db.prepare('SELECT mother_id, company_name, universal_keys, created_at, updated_at FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as any;
+    if (row) {
+      return {
+        motherId: row.mother_id,
+        companyName: row.company_name || null,
+        universalKeys: row.universal_keys === 1 || row.universal_keys === true || String(row.universal_keys) === 'true',
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Updates universal API keys policy for a company across SQLite and PostgreSQL in ai_tenant_details.
+ */
+export async function setCompanyUniversalKeys(motherId: string, enabled: boolean, companyName?: string): Promise<void> {
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+  ensureTenantDetailsTable(db);
   const flag = enabled ? 1 : 0;
 
   try {
+    // 1. Update/insert central ai_tenant_details in SQLite
+    db.prepare(`
+      INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, created_at, updated_at)
+      VALUES (?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(mother_id) DO UPDATE SET
+        universal_keys = excluded.universal_keys,
+        company_name = COALESCE(excluded.company_name, ai_tenant_details.company_name),
+        updated_at = datetime('now')
+    `).run(normId, companyName || null, flag);
+
+    // 2. Also update tenant_api_keys and settings
     db.prepare('UPDATE tenant_api_keys SET universal_keys = ? WHERE LOWER(mother_id) = LOWER(?)').run(flag, normId);
     db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(`universal_keys_${normId}`, enabled ? 'true' : 'false');
-    if (enabled) {
-      db.prepare('UPDATE api_keys SET is_universal = 1 WHERE LOWER(mother_id) = LOWER(?)').run(normId);
-    }
   } catch (err: any) {
     console.warn('[tenant] Error setting universal keys in SQLite:', err.message);
   }
@@ -561,10 +631,20 @@ export async function setCompanyUniversalKeys(motherId: string, enabled: boolean
   const p = getPostgresPool();
   if (p) {
     try {
+      // 1. Upsert into ai_tenant_details in PostgreSQL
+      await p.query(`
+        INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, created_at, updated_at)
+        VALUES ($1, $2, $3, NOW(), NOW())
+        ON CONFLICT (mother_id) DO UPDATE SET
+          universal_keys = EXCLUDED.universal_keys,
+          company_name = COALESCE(EXCLUDED.company_name, ai_tenant_details.company_name),
+          updated_at = NOW()
+      `, [normId, companyName || null, enabled]);
+
+      // 2. Update ai_tenant_api_keys
       await p.query('UPDATE ai_tenant_api_keys SET universal_keys = $1 WHERE LOWER(mother_id) = LOWER($2)', [enabled, normId]);
-      if (enabled) {
-        await p.query('UPDATE ai_api_keys SET is_universal = TRUE WHERE LOWER(mother_id) = LOWER($1)', [normId]);
-      }
+
+      // 3. Update company_settings and companies
       try {
         await p.query('UPDATE company_settings SET universal_ai_keys = $1 WHERE company_id::text = $2', [enabled, normId]);
       } catch {}
@@ -572,7 +652,7 @@ export async function setCompanyUniversalKeys(motherId: string, enabled: boolean
         await p.query('UPDATE companies SET universal_ai_keys = $1 WHERE id::text = $2 OR LOWER(code) = LOWER($2)', [enabled, normId]);
       } catch {}
     } catch (err: any) {
-      console.warn('[PostgreSQL] Failed to sync universal_keys:', err.message);
+      console.warn('[PostgreSQL] Failed to sync universal_keys to ai_tenant_details:', err.message);
     }
   }
 }

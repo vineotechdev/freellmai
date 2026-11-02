@@ -36,7 +36,7 @@ import type { Db } from '../db/types.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { parseModelScope } from '../lib/model-scope.js';
 import { KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, maskProxyUrl } from '../lib/key-proxy.js';
-import { isCompanyUniversalKeys, setCompanyUniversalKeys } from '../services/tenant.js';
+import { isCompanyUniversalKeys, setCompanyUniversalKeys, getCompanyTenantDetails } from '../services/tenant.js';
 
 export const keysRouter = Router();
 
@@ -2151,14 +2151,17 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   res.json(response);
 });
 
-// GET /api/keys/company-settings - Get company universal keys policy
+// GET /api/keys/company-settings - Get company universal keys policy from central ai_tenant_details
 keysRouter.get('/company-settings', (req: Request, res: Response) => {
   const user = (req as any).user;
   const motherId = user?.motherId || 'default';
   const universal = isCompanyUniversalKeys(motherId);
+  const details = getCompanyTenantDetails(motherId);
   res.json({
     motherId,
+    companyName: details?.companyName || user?.companyName || 'Default Company',
     universalKeys: universal,
+    updatedAt: details?.updatedAt,
   });
 });
 
@@ -2166,15 +2169,17 @@ keysRouter.get('/company-settings', (req: Request, res: Response) => {
 keysRouter.patch('/company-settings', async (req: Request, res: Response) => {
   const user = (req as any).user;
   const motherId = req.body.motherId || user?.motherId || 'default';
+  const companyName = req.body.companyName || user?.companyName;
   const { universalKeys } = req.body;
   if (typeof universalKeys !== 'boolean') {
     res.status(400).json({ error: { message: 'universalKeys must be a boolean' } });
     return;
   }
-  await setCompanyUniversalKeys(String(motherId), universalKeys);
+  await setCompanyUniversalKeys(String(motherId), universalKeys, companyName);
   res.json({
     success: true,
     motherId: String(motherId),
+    companyName: companyName || null,
     universalKeys,
   });
 });
@@ -2183,11 +2188,51 @@ keysRouter.patch('/company-settings', async (req: Request, res: Response) => {
 keysRouter.post('/set-universal', async (req: Request, res: Response) => {
   const user = (req as any).user;
   const motherId = req.body.motherId || user?.motherId || 'default';
+  const companyName = req.body.companyName || user?.companyName;
   const universalKeys = req.body.universalKeys !== undefined ? Boolean(req.body.universalKeys) : true;
-  await setCompanyUniversalKeys(String(motherId), universalKeys);
+  await setCompanyUniversalKeys(String(motherId), universalKeys, companyName);
   res.json({
     success: true,
     motherId: String(motherId),
+    companyName: companyName || null,
     universalKeys,
   });
+});
+
+// GET /api/keys/tenant-details - Get tenant details for a specific motherId
+keysRouter.get('/tenant-details', (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = req.query.motherId ? String(req.query.motherId) : (user?.motherId || 'default');
+  const universal = isCompanyUniversalKeys(motherId);
+  const details = getCompanyTenantDetails(motherId);
+  res.json({
+    success: true,
+    tenant: {
+      motherId,
+      companyName: details?.companyName || user?.companyName || 'Default Company',
+      universalKeys: universal,
+      createdAt: details?.createdAt,
+      updatedAt: details?.updatedAt,
+    }
+  });
+});
+
+// GET /api/keys/all-tenants - List all company tenants and their universal key policies
+keysRouter.get('/all-tenants', (req: Request, res: Response) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare('SELECT mother_id, company_name, universal_keys, created_at, updated_at FROM ai_tenant_details ORDER BY mother_id').all();
+    res.json({
+      success: true,
+      tenants: rows.map((r: any) => ({
+        motherId: r.mother_id,
+        companyName: r.company_name,
+        universalKeys: r.universal_keys === 1 || r.universal_keys === true || String(r.universal_keys) === 'true',
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
