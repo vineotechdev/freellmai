@@ -1,6 +1,7 @@
 import { getDb } from '../db/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { reserveMonthlyBudget } from './key-budget.js';
+import { isCompanyUniversalKeys } from './tenant.js';
 
 export interface ReservedProviderCredential {
   id: number;
@@ -39,8 +40,31 @@ export function reserveProviderCredential(
       WHERE id = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
     `).all(row.key_id) as KeyRow[];
   } else {
-    // 1. User-specific keys
-    if (userId) {
+    if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+      try {
+        const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+        if (tRow?.mother_id) motherId = tRow.mother_id;
+      } catch {}
+    }
+    const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+
+    if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      try {
+        keys = db.prepare(`
+          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND enabled = 1 AND status IN ('healthy', 'unknown')
+          ORDER BY RANDOM()
+        `).all(row.platform, motherId) as KeyRow[];
+      } catch {}
+    } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      try {
+        keys = db.prepare(`
+          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+          WHERE platform = ? AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) AND enabled = 1 AND status IN ('healthy', 'unknown')
+          ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), RANDOM()
+        `).all(row.platform, userId, motherId, userId) as KeyRow[];
+      } catch {}
+    } else if (userId) {
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
@@ -48,23 +72,16 @@ export function reserveProviderCredential(
           ORDER BY RANDOM()
         `).all(row.platform, userId) as KeyRow[];
       } catch {}
-    }
-    // 2. Tenant keys
-    if (keys.length === 0 && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR user_id = ?) AND enabled = 1 AND status IN ('healthy', 'unknown')
-          ORDER BY RANDOM()
-        `).all(row.platform, motherId, userId ?? 0) as KeyRow[];
-      } catch {
-        keys = db.prepare(`
-          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND enabled = 1 AND status IN ('healthy', 'unknown')
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1) AND enabled = 1 AND status IN ('healthy', 'unknown')
           ORDER BY RANDOM()
         `).all(row.platform, motherId) as KeyRow[];
-      }
+      } catch {}
     }
+
     // 3. Fallback
     if (keys.length === 0) {
       keys = db.prepare(`

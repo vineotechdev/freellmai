@@ -398,6 +398,14 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
   const { models: allListed, autoContextWindow } = buildModelListing(filters.userId, filters.motherId);
   const listed = filters.onlyAvailable ? allListed.filter(m => m.available === 1) : allListed;
 
+  const keyFilter = filters.userId && filters.motherId
+    ? `AND (k.user_id = ${Number(filters.userId)} OR (LOWER(k.mother_id) = LOWER(${JSON.stringify(filters.motherId)}) AND k.is_universal = 1))`
+    : filters.userId
+    ? `AND k.user_id = ${Number(filters.userId)}`
+    : filters.motherId && filters.motherId !== 'all' && filters.motherId.toLowerCase() !== 'default'
+    ? `AND LOWER(k.mother_id) = LOWER(${JSON.stringify(filters.motherId)}) AND (k.user_id IS NULL OR k.is_universal = 1)`
+    : '';
+
   // Named fallback chains (#960/#895): every user-defined profile is exposed
   // as an `auto:<name>` model so a client can pick a specific fallback chain
   // per request (auto:my-group) instead of only the active one. Available iff
@@ -412,6 +420,7 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
                AND EXISTS (
                  SELECT 1 FROM api_keys k
                  WHERE k.platform = m.platform AND k.enabled = 1
+                   ${keyFilter}
                    AND (m.key_id IS NULL OR k.id = m.key_id)
                )
            ) AS usable,

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getDb } from '../db/index.js';
 import { syncApiKeysFromPostgres, isPostgresConfigured } from '../db/postgres.js';
+import { isCompanyUniversalKeys } from '../services/tenant.js';
 import { checkKeyHealth, checkAllKeys, pollKeyQuota, supportsQuotaPolling } from '../services/health.js';
 import { getDegradationStatus } from '../services/degradation.js';
 import { runModelProbePass } from '../services/model-probe.js';
@@ -22,49 +23,46 @@ healthRouter.get('/', async (req: Request, res: Response) => {
     await syncApiKeysFromPostgres(db, userId, motherId);
   }
 
-  const platforms = userId
-    ? db.prepare(`
-        SELECT
-          platform,
-          COUNT(*) as total_keys,
-          SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
-          SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
-          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
-          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
-          SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
-          SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
-        FROM api_keys
-        WHERE user_id = ?
-        GROUP BY platform
-      `).all(userId) as any[]
-    : db.prepare(`
-        SELECT
-          platform,
-          COUNT(*) as total_keys,
-          SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
-          SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
-          SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
-          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
-          SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
-          SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
-        FROM api_keys
-        WHERE mother_id = ? AND user_id IS NULL
-        GROUP BY platform
-      `).all(motherId) as any[];
+  const isUniversal = isCompanyUniversalKeys(motherId);
+  let keyWhere = '';
+  const keyParams: any[] = [];
+  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keyWhere = 'WHERE LOWER(mother_id) = LOWER(?)';
+    keyParams.push(motherId);
+  } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keyWhere = 'WHERE (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))';
+    keyParams.push(userId, motherId);
+  } else if (userId) {
+    keyWhere = 'WHERE user_id = ?';
+    keyParams.push(userId);
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keyWhere = 'WHERE LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)';
+    keyParams.push(motherId);
+  } else {
+    keyWhere = 'WHERE user_id IS NULL';
+  }
 
-  const keys = userId
-    ? db.prepare(`
-        SELECT id, platform, label, status, enabled, created_at, last_checked_at, last_healthy_at, last_health_error
-        FROM api_keys
-        WHERE user_id = ?
-        ORDER BY platform, created_at DESC
-      `).all(userId) as any[]
-    : db.prepare(`
-        SELECT id, platform, label, status, enabled, created_at, last_checked_at, last_healthy_at, last_health_error
-        FROM api_keys
-        WHERE mother_id = ? AND user_id IS NULL
-        ORDER BY platform, created_at DESC
-      `).all(motherId) as any[];
+  const platforms = db.prepare(`
+    SELECT
+      platform,
+      COUNT(*) as total_keys,
+      SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) as healthy_keys,
+      SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END) as rate_limited_keys,
+      SUM(CASE WHEN status = 'invalid' THEN 1 ELSE 0 END) as invalid_keys,
+      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_keys,
+      SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) as unknown_keys,
+      SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) as enabled_keys
+    FROM api_keys
+    ${keyWhere}
+    GROUP BY platform
+  `).all(...keyParams) as any[];
+
+  const keys = db.prepare(`
+    SELECT id, platform, label, status, enabled, is_universal, created_at, last_checked_at, last_healthy_at, last_health_error
+    FROM api_keys
+    ${keyWhere}
+    ORDER BY platform, created_at DESC
+  `).all(...keyParams) as any[];
 
   res.json({
     platforms: platforms.map(p => ({
@@ -105,9 +103,14 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
-  const row = userId
+  const isUniversal = isCompanyUniversalKeys(motherId);
+  const row = isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
+    ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?)').get(keyId, motherId)
+    : userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
+    ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))').get(keyId, userId, motherId)
+    : userId
     ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(keyId, userId)
-    : getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(keyId, motherId);
+    : getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)').get(keyId, motherId);
   if (!row) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;

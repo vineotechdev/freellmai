@@ -423,9 +423,37 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
   if (!p || !isInitialized) return;
 
   try {
+    if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+      try {
+        const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+        if (tRow?.mother_id) motherId = tRow.mother_id;
+      } catch {}
+    }
+
+    let isUniv = false;
+    if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      try {
+        const sRow = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) AND universal_keys = 1 LIMIT 1').get(motherId) as any;
+        if (sRow) {
+          isUniv = true;
+        } else {
+          const pRow = await p.query('SELECT universal_keys FROM ai_tenant_api_keys WHERE LOWER(mother_id) = LOWER($1) AND universal_keys = TRUE LIMIT 1', [motherId]);
+          if (pRow.rows.length > 0) {
+            isUniv = true;
+            try {
+              db.prepare('UPDATE tenant_api_keys SET universal_keys = 1 WHERE LOWER(mother_id) = LOWER(?)').run(motherId);
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
     let query = 'SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at FROM ai_api_keys';
     const params: any[] = [];
-    if (userId && motherId) {
+    if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      query += ' WHERE LOWER(mother_id) = LOWER($1)';
+      params.push(motherId);
+    } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       query += ' WHERE user_id = $1 OR (LOWER(mother_id) = LOWER($2) AND is_universal = TRUE)';
       params.push(userId, motherId);
     } else if (userId) {
@@ -443,23 +471,32 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
       const existing = db.prepare('SELECT id FROM api_keys WHERE id = ?').get(row.id);
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       const lastHealthyStr = row.last_healthy_at instanceof Date ? row.last_healthy_at.toISOString() : (row.last_healthy_at ? String(row.last_healthy_at) : null);
-      const isUniv = (row.is_universal === true || row.is_universal === 1 || String(row.is_universal) === 'true') ? 1 : 0;
+      const isUniversalFlag = (row.is_universal === true || row.is_universal === 1 || String(row.is_universal) === 'true') ? 1 : 0;
       if (!existing) {
         db.prepare(`
           INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
+        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniversalFlag, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
       } else {
         db.prepare(`
           UPDATE api_keys SET
             platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = ?, enabled = ?, is_universal = ?, mother_id = ?, user_id = ?, last_healthy_at = ?, last_health_error = ?
           WHERE id = ?
-        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
+        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniversalFlag, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
       }
     }
 
     // Clean up local SQLite keys for this user/tenant that were removed from PostgreSQL
-    if (userId) {
+    if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      const localKeys = db.prepare(
+        'SELECT id FROM api_keys WHERE user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)'
+      ).all(userId, motherId) as { id: number }[];
+      for (const lk of localKeys) {
+        if (!pgKeyIds.has(Number(lk.id))) {
+          db.prepare('DELETE FROM api_keys WHERE id = ?').run(lk.id);
+        }
+      }
+    } else if (userId) {
       const localKeys = db.prepare('SELECT id FROM api_keys WHERE user_id = ?').all(userId) as { id: number }[];
       for (const lk of localKeys) {
         if (!pgKeyIds.has(Number(lk.id))) {

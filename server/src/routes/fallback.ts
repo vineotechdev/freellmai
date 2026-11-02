@@ -20,6 +20,7 @@ import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 import { getQuotaOutlook } from '../services/quota-outlook.js';
 import { getDecisionRoutingStatus, setDecisionRoutingSettings } from '../services/routing-decision.js';
 import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
+import { isCompanyUniversalKeys } from '../services/tenant.js';
 import type { SessionUser } from '../services/auth.js';
 
 export const fallbackRouter = Router();
@@ -272,15 +273,22 @@ fallbackRouter.get('/', async (req: Request, res: Response) => {
   // Count usable keys per platform — enabled AND healthy/unknown status. Unified
   // with /token-usage and the routing scorer (#456) so budget pooling is computed
   // from the same key set everywhere (a disabled or invalid key adds no capacity).
+  const isUniversal = user?.motherId ? isCompanyUniversalKeys(user.motherId) : false;
   let keyCountsQuery = `
     SELECT platform, COUNT(*) as count
     FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown')`;
   const keyParams: any[] = [];
-  if (user?.userId) {
+  if (isUniversal && user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?)`;
+    keyParams.push(user.motherId);
+  } else if (user?.userId && user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))`;
+    keyParams.push(user.userId, user.motherId);
+  } else if (user?.userId) {
     keyCountsQuery += ` AND user_id = ?`;
     keyParams.push(user.userId);
   } else if (user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
-    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL`;
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)`;
     keyParams.push(user.motherId);
   } else {
     keyCountsQuery += ` AND user_id IS NULL`;

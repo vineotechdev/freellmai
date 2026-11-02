@@ -24,6 +24,7 @@ import { withKeyProxy } from '../lib/proxy.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { recordRequest, recordTokens } from '../services/ratelimit.js';
 import { isPostgresConfigured, syncApiKeysFromPostgres } from '../db/postgres.js';
+import { isCompanyUniversalKeys } from '../services/tenant.js';
 import type { SessionUser } from '../services/auth.js';
 
 export const modelsRouter = Router();
@@ -464,16 +465,23 @@ modelsRouter.get('/', async (req: Request, res: Response) => {
   `).all(activeProfileId) as any[];
 
   // Count keys per platform
+  const isUniversal = user?.motherId ? isCompanyUniversalKeys(user.motherId) : false;
   let keyCountsQuery = `
     SELECT platform, COUNT(*) as count
     FROM api_keys
     WHERE enabled = 1`;
   const keyParams: any[] = [];
-  if (user?.userId) {
+  if (isUniversal && user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?)`;
+    keyParams.push(user.motherId);
+  } else if (user?.userId && user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
+    keyCountsQuery += ` AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))`;
+    keyParams.push(user.userId, user.motherId);
+  } else if (user?.userId) {
     keyCountsQuery += ` AND user_id = ?`;
     keyParams.push(user.userId);
   } else if (user?.motherId && user.motherId !== 'all' && user.motherId.toLowerCase() !== 'default') {
-    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL`;
+    keyCountsQuery += ` AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)`;
     keyParams.push(user.motherId);
   } else {
     keyCountsQuery += ` AND user_id IS NULL`;

@@ -2,6 +2,7 @@ import type { ModelListRow } from '@freellmapi/shared/types.js';
 import { getDb } from '../db/index.js';
 import { isUnifyEnabled, getModelGroups } from './model-groups.js';
 import { hasUsableKeyForModel } from './router.js';
+import { isCompanyUniversalKeys } from './tenant.js';
 
 // Shared catalog-listing logic behind both the OpenAI `GET /v1/models` and the
 // Anthropic `GET /v1/models` endpoints, so the two wire formats list the exact
@@ -55,11 +56,23 @@ function executionStatusFor(modelDbIds: number[], available: number, userId?: nu
 }
 
 export function buildModelListing(userId?: number, motherId?: string): ModelListing {
+  const db = getDb();
+  if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+    try {
+      const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+      if (tRow?.mother_id) motherId = tRow.mother_id;
+    } catch {}
+  }
+  const isUniv = motherId ? isCompanyUniversalKeys(motherId) : false;
   let userKeyFilter = '';
-  if (userId) {
+  if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)})`;
+  } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    userKeyFilter = ` AND (k.user_id = ${Number(userId)} OR (LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND k.is_universal = 1))`;
+  } else if (userId) {
     userKeyFilter = ` AND k.user_id = ${Number(userId)}`;
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND k.user_id IS NULL`;
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND (k.user_id IS NULL OR k.is_universal = 1)`;
   }
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (
@@ -69,7 +82,6 @@ export function buildModelListing(userId?: number, motherId?: string): ModelList
           ${userKeyFilter}
           AND (m.key_id IS NULL OR k.id = m.key_id)
       ) THEN 1 ELSE 0 END)`;
-  const db = getDb();
 
   let allListed: NormalizedModel[];
 
