@@ -36,7 +36,7 @@ import type { Db } from '../db/types.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { parseModelScope } from '../lib/model-scope.js';
 import { KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, maskProxyUrl } from '../lib/key-proxy.js';
-import { isCompanyUniversalKeys, setCompanyUniversalKeys, getCompanyTenantDetails } from '../services/tenant.js';
+import { isCompanyUniversalKeys, setCompanyUniversalKeys, getCompanyTenantDetails, getTenantApiKey, getUserApiKey, normalizeMotherId } from '../services/tenant.js';
 
 export const keysRouter = Router();
 
@@ -2168,32 +2168,101 @@ keysRouter.get('/company-settings', (req: Request, res: Response) => {
 // PATCH /api/keys/company-settings - Update company universal keys policy
 keysRouter.patch('/company-settings', async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const motherId = req.body.motherId || user?.motherId || 'default';
-  const companyName = req.body.companyName || user?.companyName;
+  if (!user || (!user.isAdmin && user.role !== 'admin' && !user.roles?.includes('ROLE_ADMIN') && !user.roles?.includes('ROLE_SUPER_ADMIN'))) {
+    res.status(403).json({
+      error: {
+        message: 'Forbidden: Only company administrators can modify company universal keys policy.',
+        code: 'admin_required'
+      }
+    });
+    return;
+  }
+
+  // Extract mother_id directly from the admin user's JWT token
+  const rawMotherId = (user.motherId && user.motherId !== 'default' && user.motherId !== 'all')
+    ? user.motherId
+    : (req.body.motherId ? normalizeMotherId(String(req.body.motherId)) : 'default');
+
+  if (!rawMotherId || rawMotherId === 'default') {
+    res.status(400).json({
+      error: {
+        message: 'Invalid company mother ID in token',
+        code: 'invalid_mother_id'
+      }
+    });
+    return;
+  }
+
+  const motherId = normalizeMotherId(rawMotherId);
+  const companyName = req.body.companyName || user.companyName || 'Default Company';
   const { universalKeys } = req.body;
   if (typeof universalKeys !== 'boolean') {
     res.status(400).json({ error: { message: 'universalKeys must be a boolean' } });
     return;
   }
-  await setCompanyUniversalKeys(String(motherId), universalKeys, companyName);
+
+  // Follow registration / auto-provisioning flow if company or user is coming for the first time
+  const effectiveUserId = user.userId;
+  try {
+    getTenantApiKey(motherId, companyName);
+  } catch (err: any) {
+    console.warn('[keys] Provision tenant API key warning:', err.message);
+  }
+  if (effectiveUserId) {
+    try {
+      getUserApiKey(effectiveUserId, motherId, companyName);
+    } catch (err: any) {
+      console.warn('[keys] Provision user API key warning:', err.message);
+    }
+  }
+
+  // Flip the universal flag in ai_tenant_details table and Neon PostgreSQL
+  await setCompanyUniversalKeys(motherId, universalKeys, companyName);
+
   res.json({
     success: true,
-    motherId: String(motherId),
+    motherId,
     companyName: companyName || null,
     universalKeys,
+    updatedBy: {
+      userId: effectiveUserId,
+      email: user.email,
+      role: user.role,
+      roles: user.roles,
+    },
+    message: universalKeys
+      ? `Universal keys enabled for company ${motherId}. All company users can now use shared keys.`
+      : `Universal keys disabled for company ${motherId}. Keys remain private to individual users.`
   });
 });
 
 // POST /api/keys/set-universal - Internal / admin sync to set company keys as universal
 keysRouter.post('/set-universal', async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const motherId = req.body.motherId || user?.motherId || 'default';
-  const companyName = req.body.companyName || user?.companyName;
+  if (!user || (!user.isAdmin && user.role !== 'admin' && !user.roles?.includes('ROLE_ADMIN') && !user.roles?.includes('ROLE_SUPER_ADMIN'))) {
+    res.status(403).json({
+      error: {
+        message: 'Forbidden: Only company administrators can modify company universal keys policy.',
+        code: 'admin_required'
+      }
+    });
+    return;
+  }
+
+  const rawMotherId = (user.motherId && user.motherId !== 'default' && user.motherId !== 'all')
+    ? user.motherId
+    : (req.body.motherId ? normalizeMotherId(String(req.body.motherId)) : 'default');
+  const motherId = normalizeMotherId(rawMotherId);
+  const companyName = req.body.companyName || user.companyName || 'Default Company';
   const universalKeys = req.body.universalKeys !== undefined ? Boolean(req.body.universalKeys) : true;
-  await setCompanyUniversalKeys(String(motherId), universalKeys, companyName);
+
+  try { getTenantApiKey(motherId, companyName); } catch {}
+  if (user.userId) { try { getUserApiKey(user.userId, motherId, companyName); } catch {} }
+
+  await setCompanyUniversalKeys(motherId, universalKeys, companyName);
   res.json({
     success: true,
-    motherId: String(motherId),
+    motherId,
     companyName: companyName || null,
     universalKeys,
   });
