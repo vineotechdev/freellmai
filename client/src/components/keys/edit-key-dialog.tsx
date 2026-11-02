@@ -20,6 +20,7 @@ type UpdateBody = {
   monthlyTokenCap?: number
   groupLabel?: string
   proxyUrl?: string
+  isUniversal?: boolean
 }
 
 /** Parse a budget-cap input: blank or 0 means unlimited (0); otherwise a
@@ -106,6 +107,7 @@ export function EditKeyDialog({
   // masked password can never be submitted back over the real one.
   const [proxyUrl, setProxyUrl] = useState('')
   const [clearProxy, setClearProxy] = useState(false)
+  const [isUniversal, setIsUniversal] = useState(apiKey.isUniversal ?? false)
 
   const needsAccountId = apiKey.platform === 'cloudflare'
   // Every row takes a credential, including the anonymous row of a
@@ -129,7 +131,8 @@ export function EditKeyDialog({
   const tokenCapChanged = tokenCapValue !== (apiKey.monthlyTokenCap || 0)
   const groupLabelChanged = isCustom && groupLabel.trim() !== (apiKey.groupLabel ?? '')
   const proxyChanged = Boolean(proxyUrl.trim()) || clearProxy
-  const hasChanges = label !== apiKey.label || Boolean(credential) || requestCapChanged || tokenCapChanged || groupLabelChanged || proxyChanged
+  const universalChanged = isUniversal !== (apiKey.isUniversal ?? false)
+  const hasChanges = label !== apiKey.label || Boolean(credential) || requestCapChanged || tokenCapChanged || groupLabelChanged || proxyChanged || universalChanged
 
   const updateKey = useMutation({
     mutationFn: (body: UpdateBody) =>
@@ -153,6 +156,7 @@ export function EditKeyDialog({
     if (requestCapChanged && requestCapValue !== null) body.monthlyRequestCap = requestCapValue
     if (tokenCapChanged && tokenCapValue !== null) body.monthlyTokenCap = tokenCapValue
     if (groupLabelChanged) body.groupLabel = groupLabel.trim()
+    if (universalChanged) body.isUniversal = isUniversal
     // '' clears the override; a typed URL replaces it (and wins over Remove).
     if (proxyChanged) body.proxyUrl = proxyUrl.trim()
     if (Object.keys(body).length > 0) updateKey.mutate(body)
@@ -263,6 +267,20 @@ export function EditKeyDialog({
             <p className="text-[11px] text-muted-foreground">
               {clearProxy && !proxyUrl.trim() ? t('keys.keyProxyRemoved') : t('keys.keyProxyHint')}
             </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1 pb-1">
+            <input
+              id="edit-key-is-universal"
+              type="checkbox"
+              checked={isUniversal}
+              onChange={e => setIsUniversal(e.target.checked)}
+              className="size-4 accent-purple-600 rounded cursor-pointer"
+            />
+            <label htmlFor="edit-key-is-universal" className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
+              <span className="font-medium text-foreground">Universal Key</span>
+              <span>(shared across all users in your company)</span>
+            </label>
           </div>
 
           {/* Monthly budget (#1158) stays one collapsed line; it opens by

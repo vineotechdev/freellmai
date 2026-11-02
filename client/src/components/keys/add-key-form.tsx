@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -47,6 +47,18 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
   // holding five Groq keys reopened this dialog five times. Off by default: the
   // single-key field masks what you type, and a textarea cannot.
   const [several, setSeveral] = useState(false)
+  const [isUniversal, setIsUniversal] = useState(true)
+
+  const { data: companySettings } = useQuery<{ motherId: string; universalKeys: boolean }>({
+    queryKey: ['company-settings'],
+    queryFn: () => apiFetch('/api/keys/company-settings'),
+  })
+
+  useEffect(() => {
+    if (companySettings?.universalKeys !== undefined) {
+      setIsUniversal(companySettings.universalKeys)
+    }
+  }, [companySettings?.universalKeys])
 
   // #707: the platform dropdown had no search and no way to skip providers that
   // already have keys, which is painful at thirty-odd entries. The shared
@@ -182,7 +194,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
     // A blank key on a key-optional provider enables its anonymous tier; the
     // backend stores a sentinel and sends no Authorization header.
     const key = isKeyless ? apiKey.trim() : (needsAccountId ? `${accountId}:${apiKey}` : apiKey)
-    addKey.mutate({ platform, key, label: label || undefined })
+    addKey.mutate({ platform, key, label: label || undefined, isUniversal } as any)
   }
 
   return (
@@ -291,6 +303,19 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
                   : isKeyless && !apiKey.trim() ? t('keys.enable') : t('keys.addKey')}
             </Button>
           </div>
+        </div>
+        <div className="w-full flex items-center gap-2 pt-1">
+          <input
+            id="add-key-is-universal"
+            type="checkbox"
+            checked={isUniversal}
+            onChange={e => setIsUniversal(e.target.checked)}
+            className="size-4 accent-purple-600 rounded cursor-pointer"
+          />
+          <label htmlFor="add-key-is-universal" className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
+            <span className="font-medium text-foreground">Make Universal Key</span>
+            <span>(shared across company users with same Mother ID)</span>
+          </label>
         </div>
       </form>
       {(addKey.isError || addSeveral.isError) && (

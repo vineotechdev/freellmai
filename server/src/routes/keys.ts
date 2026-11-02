@@ -4,7 +4,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import { getDb } from '../db/index.js';
-import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres, syncApiKeysFromPostgres, isPostgresConfigured } from '../db/postgres.js';
+import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres, syncApiKeysFromPostgres, isPostgresConfigured, getPostgresPool } from '../db/postgres.js';
 import { resolveProvider, getAllProviders } from '../providers/index.js';
 import { OpenAICompatProvider, isAnonymousCredential } from '../providers/openai-compat.js';
 import { getSyncState } from '../services/catalog-sync.js';
@@ -36,6 +36,7 @@ import type { Db } from '../db/types.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import { parseModelScope } from '../lib/model-scope.js';
 import { KEY_PROXY_URL_ERROR, KEY_PROXY_URL_MAX, decryptProxyUrl, encryptProxyUrl, isValidKeyProxyUrl, maskProxyUrl } from '../lib/key-proxy.js';
+import { isCompanyUniversalKeys, setCompanyUniversalKeys } from '../services/tenant.js';
 
 export const keysRouter = Router();
 
@@ -124,6 +125,7 @@ const addKeySchema = z.object({
   key: z.string().optional(),
   label: z.string().optional(),
   proxyUrl: proxyUrlSchema.optional(),
+  isUniversal: z.boolean().optional(),
 });
 
 // `modelScope` (#657): the model_id list this key may serve — relay stations
@@ -132,6 +134,7 @@ const addKeySchema = z.object({
 const updateKeySchema = z.object({
   enabled: z.boolean().optional(),
   label: z.string().optional(),
+  isUniversal: z.boolean().optional(),
   modelScope: z.array(z.string().trim().min(1).max(200)).max(100).nullable().optional(),
   // #590: '' clears the per-key proxy; absent leaves it unchanged.
   proxyUrl: proxyUrlSchema.optional(),
@@ -404,16 +407,20 @@ keysRouter.get('/', async (req: Request, res: Response) => {
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
+  const isUniversal = isCompanyUniversalKeys(motherId);
 
   if (isPostgresConfigured()) {
     await syncApiKeysFromPostgres(db, userId, motherId);
   }
 
   let rows: any[] = [];
-  if (userId) {
+  if (isUniversal) {
+    // Company Universal Keys enabled: pool all keys belonging to this company (strictly isolated by mother_id)
+    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
+  } else if (userId) {
     rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];
   } else {
-    rows = db.prepare('SELECT * FROM api_keys WHERE mother_id = ? AND user_id IS NULL ORDER BY created_at DESC').all(motherId) as any[];
+    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND user_id IS NULL ORDER BY created_at DESC').all(motherId) as any[];
   }
   const modelCounts = new Map<string, number>();
   const modelCountFor = (platform: string): number => {
@@ -516,6 +523,9 @@ keysRouter.get('/', async (req: Request, res: Response) => {
       },
       status: row.status,
       enabled: row.enabled === 1,
+      isUniversal: Boolean(row.is_universal),
+      userId: row.user_id ? Number(row.user_id) : null,
+      motherId: row.mother_id || 'default',
       // `keyOptional`: the platform works with or without a key (Kilo, OVH,
       // AI Horde). `keyless`: THIS row is the anonymous sentinel, so there is
       // no credential to copy, scope or reveal. A real key saved on a
@@ -859,6 +869,10 @@ keysRouter.post('/', async (req: Request, res: Response) => {
   // `user:pass@` credentials. Absent/'' stores NULLs = no override.
   const proxy = encryptProxyUrl(proxyUrl);
 
+  const isCompanyUniversal = isCompanyUniversalKeys(motherId);
+  const isUniversal = parsed.data.isUniversal !== undefined ? parsed.data.isUniversal : isCompanyUniversal;
+  const isUniversalNum = isUniversal ? 1 : 0;
+
   let keyId: number | bigint | undefined = 0;
   if (isPostgresConfigured()) {
     const pgKeyId = await persistApiKeyToPostgres({
@@ -869,6 +883,7 @@ keysRouter.post('/', async (req: Request, res: Response) => {
       auth_tag: authTag,
       status: 'unknown',
       enabled: 1,
+      is_universal: isUniversal,
       mother_id: motherId,
       user_id: userId,
     });
@@ -879,8 +894,8 @@ keysRouter.post('/', async (req: Request, res: Response) => {
 
   if (keyId) {
     db.prepare(`
-      INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
-      VALUES (?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
+      INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
+      VALUES (?, ?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         platform = excluded.platform,
         label = excluded.label,
@@ -889,14 +904,15 @@ keysRouter.post('/', async (req: Request, res: Response) => {
         auth_tag = excluded.auth_tag,
         status = excluded.status,
         enabled = excluded.enabled,
+        is_universal = excluded.is_universal,
         mother_id = excluded.mother_id,
         user_id = excluded.user_id
-    `).run(keyId, platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+    `).run(keyId, platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
   } else {
     const result = db.prepare(`
-      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
-      VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?)
-    `).run(platform, label ?? '', encrypted, iv, authTag, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+      INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
+      VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?, ?)
+    `).run(platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
     keyId = result.lastInsertRowid ?? 0;
   }
 
@@ -1988,10 +2004,13 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   const user = (req as any).user;
   const userId = user?.userId;
   const motherId = user?.motherId || 'default';
+  const isUniversal = isCompanyUniversalKeys(motherId);
   const db = getDb();
-  const existingKey = userId
-    ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId)
-    : db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(id, motherId);
+  const existingKey = isUniversal
+    ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?)').get(id, motherId)
+    : (userId
+      ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId)
+      : db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL').get(id, motherId));
   if (!existingKey) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -2003,7 +2022,7 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     return;
   }
 
-  const { enabled, label, modelScope, proxyUrl, key, monthlyRequestCap, monthlyTokenCap, groupLabel } = parsed.data;
+  const { enabled, label, isUniversal: updateIsUniversal, modelScope, proxyUrl, key, monthlyRequestCap, monthlyTokenCap, groupLabel } = parsed.data;
   const updates: string[] = [];
   const values: (string | number | null)[] = [];
   let changedKey: string | undefined;
@@ -2090,6 +2109,11 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
     values.push(scopeIds.length > 0 ? JSON.stringify(scopeIds) : null);
   }
 
+  if (updateIsUniversal !== undefined) {
+    updates.push('is_universal = ?');
+    values.push(updateIsUniversal ? 1 : 0);
+  }
+
   values.push(id);
 
   // Re-submitting the same key satisfies "something changed" but is a no-op;
@@ -2108,14 +2132,49 @@ keysRouter.patch('/:id', (req: Request, res: Response) => {
   }
 
   if (enabled !== undefined) void persistApiKeyEnabledToPostgres(id, enabled ? 1 : 0);
+  if (updateIsUniversal !== undefined) {
+    const p = getPostgresPool();
+    if (p) {
+      void p.query('UPDATE ai_api_keys SET is_universal = $1 WHERE id = $2', [updateIsUniversal, id]);
+    }
+  }
   if (changedKey !== undefined) clearCooldownsForKey(id);
 
   const response: Record<string, unknown> = { success: true };
   if (enabled !== undefined) response.enabled = enabled;
+  if (updateIsUniversal !== undefined) response.isUniversal = updateIsUniversal;
   if (label !== undefined) response.label = label;
   if (proxyUrl !== undefined) response.maskedProxyUrl = maskProxyUrl(proxyUrl);
   if (key !== undefined) response.maskedKey = maskKey(key);
   if (modelScope !== undefined) response.modelScope = scopeIds.length > 0 ? scopeIds : null;
   if (groupLabel !== undefined) response.groupLabel = normalizeGroupLabel(groupLabel);
   res.json(response);
+});
+
+// GET /api/keys/company-settings - Get company universal keys policy
+keysRouter.get('/company-settings', (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = user?.motherId || 'default';
+  const universal = isCompanyUniversalKeys(motherId);
+  res.json({
+    motherId,
+    universalKeys: universal,
+  });
+});
+
+// PATCH /api/keys/company-settings - Update company universal keys policy
+keysRouter.patch('/company-settings', async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = user?.motherId || 'default';
+  const { universalKeys } = req.body;
+  if (typeof universalKeys !== 'boolean') {
+    res.status(400).json({ error: { message: 'universalKeys must be a boolean' } });
+    return;
+  }
+  await setCompanyUniversalKeys(motherId, universalKeys);
+  res.json({
+    success: true,
+    motherId,
+    universalKeys,
+  });
 });

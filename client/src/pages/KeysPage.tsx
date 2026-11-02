@@ -61,6 +61,11 @@ export default function KeysPage() {
     queryFn: () => apiFetch('/api/keys'),
   })
 
+  const { data: companySettings } = useQuery<{ motherId: string; universalKeys: boolean }>({
+    queryKey: ['company-settings'],
+    queryFn: () => apiFetch('/api/keys/company-settings'),
+  })
+
   const { data: healthData } = useQuery<HealthData>({
     queryKey: ['health'],
     queryFn: () => apiFetch('/api/health'),
@@ -129,6 +134,14 @@ export default function KeysPage() {
 
         {tab === 'providers' && (
           <>
+            {companySettings?.universalKeys && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-purple-500/30 bg-purple-500/10 text-xs">
+                <div className="flex items-center gap-2 text-purple-300">
+                  <span className="font-semibold px-2 py-0.5 rounded bg-purple-500/20 text-purple-200">COMPANY UNIVERSAL MODE ACTIVE</span>
+                  <span>All universal keys are pooled and shared across users with Mother ID <strong className="text-foreground">{companySettings.motherId}</strong>.</span>
+                </div>
+              </div>
+            )}
             <ProviderChecklistSection onAddKey={platform => openAddKey(platform as Platform)} />
             <ProviderList onAddKey={() => openAddKey()} />
           </>

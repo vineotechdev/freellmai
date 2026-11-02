@@ -367,6 +367,10 @@ export interface ApiKey {
   groupLabel?: string | null;
   status: KeyStatus;
   enabled: boolean;
+  /** True when this key is marked universal and shared among users of the same company (mother_id). */
+  isUniversal?: boolean;
+  userId?: number | null;
+  motherId?: string;
   /** This row is the anonymous sentinel of a key-optional platform: there is
    *  no credential to copy, scope or reveal. */
   keyless: boolean;
@@ -412,6 +416,7 @@ export interface ApiKeyCreate {
   platform: Platform;
   key: string;
   label?: string;
+  isUniversal?: boolean;
 }
 
 // ---- Fallback Config ----

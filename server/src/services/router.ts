@@ -42,6 +42,7 @@ import { modelStatsKey, endpointScopeForBaseUrl } from '../lib/endpoint-scope.js
 import { isToolBenched } from '../lib/tool-capability.js';
 import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 import { getKeyQuotaHeadroom, inferQuotaPoolKey } from './provider-quota.js';
+import { isCompanyUniversalKeys } from './tenant.js';
 import type { BaseProvider } from '../providers/base.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { Db } from '../db/types.js';
@@ -1071,15 +1072,17 @@ interface ScoredEntry {
 // must scale to match or the headroom guardrail damps a multi-key model to the
 // floor after just one account's worth of tokens.
 function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): Map<string, number> {
-  // Per-request GROUP BY on api_keys; only changes on key writes. Real-time
-  // correctness is backed by selectKeyForModel's live per-key checks — a stale
-  // count can at worst walk one extra candidate, never route to a dead key.
-  const scopeKey = `${userId ?? ''}:${motherId ?? ''}`;
+  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  const scopeKey = `${isUniversal ? 'univ' : (userId ?? '')}:${motherId ?? ''}`;
   if (cachesEnabled() && keyCountsCache && keyCountsCache.db === db && keyCountsCache.scope === scopeKey && Date.now() - keyCountsCache.at < KEY_COUNTS_TTL_MS) {
     return keyCountsCache.map;
   }
   let rows: { platform: string; count: number }[] = [];
-  if (userId) {
+  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    rows = db.prepare(
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
+    ).all(motherId) as { platform: string; count: number }[];
+  } else if (userId) {
     rows = db.prepare(
       "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ? GROUP BY platform"
     ).all(userId) as { platform: string; count: number }[];
@@ -1601,22 +1604,34 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   const provider = getProvider(entry.platform as Platform)!;
 
   let allKeys: KeyRow[] = [];
-  // 1. Strict User-level keys (each user has their own separate keys irrespective of company)
-  if (userId) {
+  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+
+  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // 1. Company Universal Keys:
+    // Pool all keys for this company (LOWER(mother_id) = LOWER(?))
+    // Multiple users' keys for this platform are pooled together and rotated!
+    // Strictly company-isolated: never touches any other company's keys.
+    try {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
+      ).all(entry.platform, motherId) as KeyRow[];
+    } catch {}
+  } else if (userId) {
+    // 2. Strict User-level keys (each user has their own separate keys)
     try {
       allKeys = db.prepare(
         "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ?"
       ).all(entry.platform, userId) as KeyRow[];
     } catch {}
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    // 2. Company-level keys for requests without user context
+    // 3. Company-level keys for requests without user context
     try {
       allKeys = db.prepare(
         "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL"
       ).all(entry.platform, motherId) as KeyRow[];
     } catch {}
   } else {
-    // 3. System unassigned keys
+    // 4. System unassigned keys
     try {
       allKeys = db.prepare(
         "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id IS NULL"

@@ -174,9 +174,11 @@ export async function initPostgresSchema(): Promise<void> {
         mother_id TEXT NOT NULL,
         api_key TEXT NOT NULL UNIQUE,
         company_name TEXT NOT NULL DEFAULT '',
+        universal_keys BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       ALTER TABLE ai_tenant_api_keys ADD COLUMN IF NOT EXISTS user_id INTEGER;
+      ALTER TABLE ai_tenant_api_keys ADD COLUMN IF NOT EXISTS universal_keys BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE ai_tenant_api_keys DROP CONSTRAINT IF EXISTS ai_tenant_api_keys_mother_id_key;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_tenant_api_keys_user_id ON ai_tenant_api_keys(user_id) WHERE user_id IS NOT NULL;
 
@@ -189,6 +191,7 @@ export async function initPostgresSchema(): Promise<void> {
         auth_tag TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'unknown',
         enabled INTEGER NOT NULL DEFAULT 1,
+        is_universal BOOLEAN NOT NULL DEFAULT FALSE,
         mother_id TEXT,
         user_id INTEGER,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -198,9 +201,11 @@ export async function initPostgresSchema(): Promise<void> {
       );
       ALTER TABLE ai_api_keys ADD COLUMN IF NOT EXISTS user_id INTEGER;
       ALTER TABLE ai_api_keys ADD COLUMN IF NOT EXISTS mother_id TEXT;
+      ALTER TABLE ai_api_keys ADD COLUMN IF NOT EXISTS is_universal BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE ai_api_keys ADD COLUMN IF NOT EXISTS last_healthy_at TIMESTAMPTZ;
       ALTER TABLE ai_api_keys ADD COLUMN IF NOT EXISTS last_health_error TEXT;
       CREATE INDEX IF NOT EXISTS idx_ai_api_keys_user_id ON ai_api_keys(user_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_api_keys_is_universal ON ai_api_keys(is_universal);
 
       CREATE TABLE IF NOT EXISTS ai_settings (
         key TEXT PRIMARY KEY,
@@ -367,36 +372,39 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
     }
 
     // 3. Sync tenant_api_keys from PostgreSQL (ai_tenant_api_keys)
-    const tenantRes = await p.query('SELECT user_id, mother_id, api_key, company_name, created_at FROM ai_tenant_api_keys');
+    const tenantRes = await p.query('SELECT user_id, mother_id, api_key, company_name, universal_keys, created_at FROM ai_tenant_api_keys');
     for (const row of tenantRes.rows) {
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
+      const univFlag = (row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true') ? 1 : 0;
       db.prepare(`
-        INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name, created_at)
-        VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
+        INSERT INTO tenant_api_keys (user_id, mother_id, api_key, company_name, universal_keys, created_at)
+        VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
         ON CONFLICT(api_key) DO UPDATE SET
           user_id = excluded.user_id,
           mother_id = excluded.mother_id,
-          company_name = excluded.company_name
-      `).run(row.user_id ? Number(row.user_id) : null, row.mother_id, row.api_key, row.company_name || 'Default Company', createdAtStr);
+          company_name = excluded.company_name,
+          universal_keys = excluded.universal_keys
+      `).run(row.user_id ? Number(row.user_id) : null, row.mother_id, row.api_key, row.company_name || 'Default Company', univFlag, createdAtStr);
     }
 
     // 4. Sync api_keys from PostgreSQL (ai_api_keys)
-    const keysRes = await p.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, last_healthy_at, last_health_error, created_at FROM ai_api_keys');
+    const keysRes = await p.query('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, is_universal, last_healthy_at, last_health_error, created_at FROM ai_api_keys');
     for (const row of keysRes.rows) {
       const existing = db.prepare('SELECT id FROM api_keys WHERE id = ?').get(row.id);
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       const lastHealthyStr = row.last_healthy_at instanceof Date ? row.last_healthy_at.toISOString() : (row.last_healthy_at ? String(row.last_healthy_at) : null);
+      const isUniv = (row.is_universal === true || row.is_universal === 1 || String(row.is_universal) === 'true') ? 1 : 0;
       if (!existing) {
         db.prepare(`
-          INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, last_healthy_at, last_health_error, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
+          INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
       } else {
         db.prepare(`
           UPDATE api_keys SET
-            platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = ?, enabled = ?, mother_id = ?, user_id = ?, last_healthy_at = ?, last_health_error = ?
+            platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = ?, enabled = ?, is_universal = ?, mother_id = ?, user_id = ?, last_healthy_at = ?, last_health_error = ?
           WHERE id = ?
-        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
+        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
       }
     }
 
@@ -415,13 +423,16 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
   if (!p || !isInitialized) return;
 
   try {
-    let query = 'SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, last_healthy_at, last_health_error, created_at FROM ai_api_keys';
+    let query = 'SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at FROM ai_api_keys';
     const params: any[] = [];
-    if (userId) {
+    if (userId && motherId) {
+      query += ' WHERE user_id = $1 OR (LOWER(mother_id) = LOWER($2) AND is_universal = TRUE)';
+      params.push(userId, motherId);
+    } else if (userId) {
       query += ' WHERE user_id = $1';
       params.push(userId);
     } else if (motherId) {
-      query += ' WHERE mother_id = $1 AND user_id IS NULL';
+      query += ' WHERE LOWER(mother_id) = LOWER($1)';
       params.push(motherId);
     }
 
@@ -432,17 +443,18 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
       const existing = db.prepare('SELECT id FROM api_keys WHERE id = ?').get(row.id);
       const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       const lastHealthyStr = row.last_healthy_at instanceof Date ? row.last_healthy_at.toISOString() : (row.last_healthy_at ? String(row.last_healthy_at) : null);
+      const isUniv = (row.is_universal === true || row.is_universal === 1 || String(row.is_universal) === 'true') ? 1 : 0;
       if (!existing) {
         db.prepare(`
-          INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id, last_healthy_at, last_health_error, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
+          INSERT INTO api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+        `).run(Number(row.id), row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, createdAtStr);
       } else {
         db.prepare(`
           UPDATE api_keys SET
-            platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = ?, enabled = ?, mother_id = ?, user_id = ?, last_healthy_at = ?, last_health_error = ?
+            platform = ?, label = ?, encrypted_key = ?, iv = ?, auth_tag = ?, status = ?, enabled = ?, is_universal = ?, mother_id = ?, user_id = ?, last_healthy_at = ?, last_health_error = ?
           WHERE id = ?
-        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
+        `).run(row.platform, row.label, row.encrypted_key, row.iv, row.auth_tag, row.status, row.enabled, isUniv, row.mother_id || 'default', row.user_id ? Number(row.user_id) : null, lastHealthyStr, row.last_health_error || null, Number(row.id));
       }
     }
 
@@ -502,43 +514,52 @@ export async function syncAllTablesToPostgres(db: Db): Promise<void> {
     }
 
     // 3. Sync tenant_api_keys to ai_tenant_api_keys in batches
-    const tenantKeys = db.prepare('SELECT user_id, mother_id, api_key, company_name FROM tenant_api_keys').all() as any[];
+    const tenantKeys = db.prepare('SELECT user_id, mother_id, api_key, company_name, universal_keys FROM tenant_api_keys').all() as any[];
     if (tenantKeys.length > 0) {
       for (let i = 0; i < tenantKeys.length; i += 50) {
         const batch = tenantKeys.slice(i, i + 50);
         const valuePlaceholders: string[] = [];
         const params: any[] = [];
         batch.forEach((tk, idx) => {
-          const offset = idx * 4;
-          valuePlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`);
-          params.push(tk.user_id ? Number(tk.user_id) : null, tk.mother_id, tk.api_key, tk.company_name || '');
+          const offset = idx * 5;
+          valuePlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
+          params.push(
+            tk.user_id ? Number(tk.user_id) : null,
+            tk.mother_id,
+            tk.api_key,
+            tk.company_name || '',
+            Boolean(tk.universal_keys)
+          );
         });
         await p.query(
-          `INSERT INTO ai_tenant_api_keys (user_id, mother_id, api_key, company_name)
+          `INSERT INTO ai_tenant_api_keys (user_id, mother_id, api_key, company_name, universal_keys)
            VALUES ${valuePlaceholders.join(', ')}
            ON CONFLICT (api_key) DO UPDATE SET
              user_id = EXCLUDED.user_id,
              mother_id = EXCLUDED.mother_id,
-             company_name = EXCLUDED.company_name`,
+             company_name = EXCLUDED.company_name,
+             universal_keys = EXCLUDED.universal_keys`,
           params
         );
       }
     }
 
     // 4. Sync api_keys to ai_api_keys
-    const apiKeys = db.prepare('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id FROM api_keys').all() as any[];
+    const apiKeys = db.prepare('SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id FROM api_keys').all() as any[];
     for (const k of apiKeys) {
       const exists = await p.query('SELECT id, user_id FROM ai_api_keys WHERE id = $1', [k.id]);
+      const isUniv = Boolean(k.is_universal);
       if (exists.rows.length === 0) {
         await p.query(
-          `INSERT INTO ai_api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `INSERT INTO ai_api_keys (id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (id) DO UPDATE SET
              platform = EXCLUDED.platform,
              label = EXCLUDED.label,
              status = EXCLUDED.status,
-             enabled = EXCLUDED.enabled`,
-          [k.id, k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, k.mother_id || null, k.user_id ? Number(k.user_id) : null]
+             enabled = EXCLUDED.enabled,
+             is_universal = EXCLUDED.is_universal`,
+          [k.id, k.platform, k.label, k.encrypted_key, k.iv, k.auth_tag, k.status, k.enabled, isUniv, k.mother_id || null, k.user_id ? Number(k.user_id) : null]
         );
       } else {
         const existingRow = exists.rows[0];
@@ -548,9 +569,9 @@ export async function syncAllTablesToPostgres(db: Db): Promise<void> {
           : (existingRow.mother_id === k.mother_id && !existingRow.user_id);
         if (isOwner) {
           await p.query(
-            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3
-             WHERE id = $4`,
-            [k.label, k.status, k.enabled, k.id]
+            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, is_universal = $4
+             WHERE id = $5`,
+            [k.label, k.status, k.enabled, isUniv, k.id]
           );
         }
       }
@@ -625,19 +646,21 @@ export async function persistUserToPostgres(user: { id?: number | null; email: s
 /**
  * Persists a tenant API key to PostgreSQL ai_tenant_api_keys immediately.
  */
-export async function persistTenantKeyToPostgres(item: { user_id?: number | null; mother_id: string; api_key: string; company_name?: string }): Promise<void> {
+export async function persistTenantKeyToPostgres(item: { user_id?: number | null; mother_id: string; api_key: string; company_name?: string; universal_keys?: boolean }): Promise<void> {
   const p = getPostgresPool();
   if (!p || !isInitialized) return;
 
   try {
+    const isUniv = Boolean(item.universal_keys);
     await p.query(
-      `INSERT INTO ai_tenant_api_keys (user_id, mother_id, api_key, company_name)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO ai_tenant_api_keys (user_id, mother_id, api_key, company_name, universal_keys)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (api_key) DO UPDATE SET
          user_id = EXCLUDED.user_id,
          mother_id = EXCLUDED.mother_id,
-         company_name = EXCLUDED.company_name`,
-      [item.user_id ? Number(item.user_id) : null, item.mother_id, item.api_key, item.company_name || '']
+         company_name = EXCLUDED.company_name,
+         universal_keys = EXCLUDED.universal_keys`,
+      [item.user_id ? Number(item.user_id) : null, item.mother_id, item.api_key, item.company_name || '', isUniv]
     );
   } catch (err: any) {
     console.error('[PostgreSQL] Failed to persist tenant key:', err.message);
@@ -648,13 +671,14 @@ export async function persistTenantKeyToPostgres(item: { user_id?: number | null
  * Persists an API key to PostgreSQL ai_api_keys immediately.
  * Returns the assigned PostgreSQL key ID.
  */
-export async function persistApiKeyToPostgres(key: { id?: number; platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; mother_id?: string; user_id?: number | null }): Promise<number | null> {
+export async function persistApiKeyToPostgres(key: { id?: number; platform: string; label: string; encrypted_key: string; iv: string; auth_tag: string; status: string; enabled: number; is_universal?: boolean | number; mother_id?: string; user_id?: number | null }): Promise<number | null> {
   const p = getPostgresPool();
   if (!p || !isInitialized) return null;
 
   try {
     const userIdNum = key.user_id ? Number(key.user_id) : null;
     const motherIdStr = key.mother_id || 'default';
+    const isUniv = Boolean(key.is_universal);
 
     // If an existing PostgreSQL key ID is provided, ONLY update if it actually belongs to this user/tenant!
     if (key.id) {
@@ -667,9 +691,9 @@ export async function persistApiKeyToPostgres(key: { id?: number; platform: stri
 
         if (isOwner) {
           await p.query(
-            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, last_checked_at = NOW()
-             WHERE id = $4`,
-            [key.label, key.status, key.enabled, key.id]
+            `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, is_universal = $4, last_checked_at = NOW()
+             WHERE id = $5`,
+            [key.label, key.status, key.enabled, isUniv, key.id]
           );
           return key.id;
         }
@@ -685,19 +709,19 @@ export async function persistApiKeyToPostgres(key: { id?: number; platform: stri
     if (duplicateQuery.rows.length > 0) {
       const dupId = Number(duplicateQuery.rows[0].id);
       await p.query(
-        `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, last_checked_at = NOW()
-         WHERE id = $4`,
-        [key.label, key.status, key.enabled, dupId]
+        `UPDATE ai_api_keys SET label = $1, status = $2, enabled = $3, is_universal = $4, last_checked_at = NOW()
+         WHERE id = $5`,
+        [key.label, key.status, key.enabled, isUniv, dupId]
       );
       return dupId;
     }
 
     // Insert as a brand-new key in PostgreSQL, returning the real PostgreSQL ID
     const insertRes = await p.query(
-      `INSERT INTO ai_api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, mother_id, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO ai_api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
-      [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, motherIdStr, userIdNum]
+      [key.platform, key.label, key.encrypted_key, key.iv, key.auth_tag, key.status, key.enabled, isUniv, motherIdStr, userIdNum]
     );
 
     return insertRes.rows.length > 0 ? Number(insertRes.rows[0].id) : null;

@@ -687,6 +687,11 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                               </Button>
                             )}
                             <code className={`text-xs font-mono flex-shrink-0 ${k.enabled ? '' : 'opacity-50'}`}>{k.maskedKey}</code>
+                            {k.isUniversal && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                                Universal
+                              </span>
+                            )}
                             {/* Clicking the label is still the edit affordance (#705),
                                 but the dialog also lets a credential be replaced in place. */}
                             <button

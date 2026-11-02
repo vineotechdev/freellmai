@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { timingSafeStringEqual } from '../lib/system-prompt.js';
 import { LLMAI_CONSTANTS, getPolarAiLoginUrl, getPolarQrValidateUrl } from '../constants/llmai_constant.js';
-import { persistTenantKeyToPostgres } from '../db/postgres.js';
+import { persistTenantKeyToPostgres, getPostgresPool } from '../db/postgres.js';
 
 export interface PolarQrValidationResult {
   valid: boolean;
@@ -508,6 +508,67 @@ export function regenerateTenantApiKey(motherId: string, companyName: string = '
   void persistTenantKeyToPostgres({ mother_id: normId, api_key: generatedKey, company_name: companyName.trim() });
 
   return generatedKey;
+}
+
+/**
+ * Checks whether universal API keys are enabled for a company (mother_id).
+ * When enabled, API keys belonging to this company are shared among all users of that company.
+ * When disabled, each user has their own separate private keys.
+ */
+export function isCompanyUniversalKeys(motherId: string): boolean {
+  if (!motherId) return false;
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+
+  try {
+    const row = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) AND universal_keys = 1 LIMIT 1').get(normId) as { universal_keys: number } | undefined;
+    if (row && Number(row.universal_keys) === 1) {
+      return true;
+    }
+  } catch {}
+
+  // Fallback to settings table
+  try {
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`universal_keys_${normId}`) as { value: string } | undefined;
+    if (settingRow && (settingRow.value === 'true' || settingRow.value === '1')) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Updates universal API keys policy for a company across SQLite and PostgreSQL.
+ */
+export async function setCompanyUniversalKeys(motherId: string, enabled: boolean): Promise<void> {
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+  const flag = enabled ? 1 : 0;
+
+  try {
+    db.prepare('UPDATE tenant_api_keys SET universal_keys = ? WHERE LOWER(mother_id) = LOWER(?)').run(flag, normId);
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(`universal_keys_${normId}`, enabled ? 'true' : 'false');
+  } catch (err: any) {
+    console.warn('[tenant] Error setting universal keys in SQLite:', err.message);
+  }
+
+  // Also sync to PostgreSQL if connected
+  const p = getPostgresPool();
+  if (p) {
+    try {
+      await p.query('UPDATE ai_tenant_api_keys SET universal_keys = $1 WHERE LOWER(mother_id) = LOWER($2)', [enabled, normId]);
+      try {
+        await p.query('UPDATE company_settings SET universal_ai_keys = $1 WHERE company_id::text = $2', [enabled, normId]);
+      } catch {}
+      try {
+        await p.query('UPDATE companies SET universal_ai_keys = $1 WHERE id::text = $2 OR LOWER(code) = LOWER($2)', [enabled, normId]);
+      } catch {}
+    } catch (err: any) {
+      console.warn('[PostgreSQL] Failed to sync universal_keys:', err.message);
+    }
+  }
 }
 
 export function resolveTenantFromApiKey(token: string | undefined): ResolvedTenant | null {
