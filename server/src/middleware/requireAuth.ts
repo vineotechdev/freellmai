@@ -6,6 +6,18 @@ import { validateSession } from '../services/auth.js';
 // as `Authorization: Bearer <token>`. The /v1 proxy is NOT gated by this — it
 // keeps its own unified-API-key auth for app clients.
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  // Allow internal synchronization from polarlistbackend
+  const internalSyncMotherId = req.headers['x-internal-sync'] as string | undefined;
+  if (internalSyncMotherId) {
+    (req as Request & { user?: any }).user = {
+      id: 0,
+      username: 'internal-sync',
+      role: 'admin',
+      motherId: String(internalSyncMotherId),
+    };
+    return next();
+  }
+
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '')
     ?? (req.headers['x-dashboard-token'] as string | undefined);
   const session = validateSession(token);

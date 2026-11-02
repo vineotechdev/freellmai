@@ -550,6 +550,9 @@ export async function setCompanyUniversalKeys(motherId: string, enabled: boolean
     db.prepare('UPDATE tenant_api_keys SET universal_keys = ? WHERE LOWER(mother_id) = LOWER(?)').run(flag, normId);
     db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(`universal_keys_${normId}`, enabled ? 'true' : 'false');
+    if (enabled) {
+      db.prepare('UPDATE api_keys SET is_universal = 1 WHERE LOWER(mother_id) = LOWER(?)').run(normId);
+    }
   } catch (err: any) {
     console.warn('[tenant] Error setting universal keys in SQLite:', err.message);
   }
@@ -559,6 +562,9 @@ export async function setCompanyUniversalKeys(motherId: string, enabled: boolean
   if (p) {
     try {
       await p.query('UPDATE ai_tenant_api_keys SET universal_keys = $1 WHERE LOWER(mother_id) = LOWER($2)', [enabled, normId]);
+      if (enabled) {
+        await p.query('UPDATE ai_api_keys SET is_universal = TRUE WHERE LOWER(mother_id) = LOWER($1)', [normId]);
+      }
       try {
         await p.query('UPDATE company_settings SET universal_ai_keys = $1 WHERE company_id::text = $2', [enabled, normId]);
       } catch {}

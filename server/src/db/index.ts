@@ -238,6 +238,20 @@ export function initDb(
     db.prepare('CREATE INDEX IF NOT EXISTS idx_users_mother_id ON users(mother_id)').run();
   } catch {}
 
+  // Defensive column safeguards: ensure is_universal and universal_keys columns exist
+  try {
+    const apiKeysCols = db.prepare('PRAGMA table_info(api_keys)').all() as { name: string }[];
+    if (apiKeysCols.length > 0 && !apiKeysCols.some(c => c.name === 'is_universal')) {
+      db.prepare('ALTER TABLE api_keys ADD COLUMN is_universal INTEGER NOT NULL DEFAULT 0').run();
+    }
+  } catch {}
+  try {
+    const tenantCols = db.prepare('PRAGMA table_info(tenant_api_keys)').all() as { name: string }[];
+    if (tenantCols.length > 0 && !tenantCols.some(c => c.name === 'universal_keys')) {
+      db.prepare('ALTER TABLE tenant_api_keys ADD COLUMN universal_keys INTEGER NOT NULL DEFAULT 0').run();
+    }
+  } catch {}
+
   return db;
 }
 

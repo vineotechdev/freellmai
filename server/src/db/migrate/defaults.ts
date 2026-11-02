@@ -48,6 +48,8 @@ import * as removeAurayProvider from '../migrations/20261019_000001_remove_auray
 import * as keyLastHealthyAt from '../migrations/20261020_000001_key_last_healthy_at.js';
 import * as multiTenantMotherId from '../migrations/20261031_000001_multi_tenant_mother_id.js';
 import * as userScopedApiKeys from '../migrations/20261031_000002_user_scoped_api_keys.js';
+import * as uniqueMotherIdAndEmail from '../migrations/20261101_000001_unique_mother_id_and_email.js';
+import * as universalApiKeys from '../migrations/20261102_000001_universal_api_keys.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -108,6 +110,8 @@ export const REMOVE_AURAY_PROVIDER_FILENAME = '20261019_000001_remove_auray_prov
 export const KEY_LAST_HEALTHY_AT_FILENAME = '20261020_000001_key_last_healthy_at.ts';
 export const MULTI_TENANT_MOTHER_ID_FILENAME = '20261031_000001_multi_tenant_mother_id.ts';
 export const USER_SCOPED_API_KEYS_FILENAME = '20261031_000002_user_scoped_api_keys.ts';
+export const UNIQUE_MOTHER_ID_AND_EMAIL_FILENAME = '20261101_000001_unique_mother_id_and_email.ts';
+export const UNIVERSAL_API_KEYS_FILENAME = '20261102_000001_universal_api_keys.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -159,4 +163,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: KEY_LAST_HEALTHY_AT_FILENAME, module: keyLastHealthyAt },
   { filename: MULTI_TENANT_MOTHER_ID_FILENAME, module: multiTenantMotherId },
   { filename: USER_SCOPED_API_KEYS_FILENAME, module: userScopedApiKeys },
+  { filename: UNIQUE_MOTHER_ID_AND_EMAIL_FILENAME, module: uniqueMotherIdAndEmail },
+  { filename: UNIVERSAL_API_KEYS_FILENAME, module: universalApiKeys },
 ];

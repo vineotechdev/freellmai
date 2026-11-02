@@ -418,9 +418,9 @@ keysRouter.get('/', async (req: Request, res: Response) => {
     // Company Universal Keys enabled: pool all keys belonging to this company (strictly isolated by mother_id)
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
   } else if (userId) {
-    rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];
+    rows = db.prepare('SELECT * FROM api_keys WHERE (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) ORDER BY created_at DESC').all(userId, motherId) as any[];
   } else {
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND user_id IS NULL ORDER BY created_at DESC').all(motherId) as any[];
+    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
   }
   const modelCounts = new Map<string, number>();
   const modelCountFor = (platform: string): number => {
@@ -2165,16 +2165,29 @@ keysRouter.get('/company-settings', (req: Request, res: Response) => {
 // PATCH /api/keys/company-settings - Update company universal keys policy
 keysRouter.patch('/company-settings', async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const motherId = user?.motherId || 'default';
+  const motherId = req.body.motherId || user?.motherId || 'default';
   const { universalKeys } = req.body;
   if (typeof universalKeys !== 'boolean') {
     res.status(400).json({ error: { message: 'universalKeys must be a boolean' } });
     return;
   }
-  await setCompanyUniversalKeys(motherId, universalKeys);
+  await setCompanyUniversalKeys(String(motherId), universalKeys);
   res.json({
     success: true,
-    motherId,
+    motherId: String(motherId),
+    universalKeys,
+  });
+});
+
+// POST /api/keys/set-universal - Internal / admin sync to set company keys as universal
+keysRouter.post('/set-universal', async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const motherId = req.body.motherId || user?.motherId || 'default';
+  const universalKeys = req.body.universalKeys !== undefined ? Boolean(req.body.universalKeys) : true;
+  await setCompanyUniversalKeys(String(motherId), universalKeys);
+  res.json({
+    success: true,
+    motherId: String(motherId),
     universalKeys,
   });
 });
