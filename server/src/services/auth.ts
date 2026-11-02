@@ -15,6 +15,9 @@ export interface SessionUser {
   email: string;
   motherId: string;
   companyName: string;
+  isAdmin?: boolean;
+  role?: string;
+  roles?: string[];
   qrCode?: string | null;
 }
 
@@ -228,6 +231,47 @@ export function createSession(userId: number): string {
   return token;
 }
 
+function isUserAdminRole(decoded: any): boolean {
+  if (!decoded) return false;
+  if (decoded.isAdmin === true || decoded.is_admin === true || decoded.isSuperAdmin === true || decoded.is_super_admin === true) {
+    return true;
+  }
+  const roleStr = typeof decoded.roles === 'string'
+    ? decoded.roles
+    : (typeof decoded.role === 'string' ? decoded.role : '');
+  if (roleStr) {
+    const parts = roleStr.toUpperCase().split(',');
+    if (parts.some((r: string) => {
+      const trimmed = r.trim();
+      return trimmed === 'ROLE_ADMIN' ||
+             trimmed === 'ROLE_SUPER_ADMIN' ||
+             trimmed === 'ADMIN' ||
+             trimmed === 'SUPER_ADMIN' ||
+             trimmed === 'ROLE_HR_MANAGER' ||
+             trimmed === 'HR_MANAGER';
+    })) {
+      return true;
+    }
+  }
+  if (Array.isArray(decoded.roles)) {
+    if (decoded.roles.some((r: any) => {
+      const s = String(r?.authority || r?.name || r).toUpperCase().trim();
+      return s === 'ROLE_ADMIN' || s === 'ROLE_SUPER_ADMIN' || s === 'ADMIN' || s === 'SUPER_ADMIN' || s === 'ROLE_HR_MANAGER' || s === 'HR_MANAGER';
+    })) {
+      return true;
+    }
+  }
+  if (Array.isArray(decoded.authorities)) {
+    if (decoded.authorities.some((a: any) => {
+      const s = String(a?.authority || a?.name || a).toUpperCase().trim();
+      return s === 'ROLE_ADMIN' || s === 'ROLE_SUPER_ADMIN' || s === 'ADMIN' || s === 'SUPER_ADMIN' || s === 'ROLE_HR_MANAGER' || s === 'HR_MANAGER';
+    })) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Resolve a session or JWT token to its user, or null if missing/expired. */
 export function validateSession(token: string | undefined | null): SessionUser | null {
   if (!token) return null;
@@ -256,9 +300,18 @@ export function validateSession(token: string | undefined | null): SessionUser |
         motherId?: string;
         companyName?: string;
         company_name?: string;
+        roles?: string[] | string;
+        role?: string;
+        isAdmin?: boolean;
+        is_admin?: boolean;
+        isSuperAdmin?: boolean;
+        is_super_admin?: boolean;
+        authorities?: any[];
       };
-      if (decoded && decoded.email) {
-        const normEmail = normalizeEmail(decoded.email);
+      if (decoded && (decoded.email || decoded.sub || decoded.userId)) {
+        const normEmail = decoded.email
+          ? normalizeEmail(decoded.email)
+          : (decoded.sub && String(decoded.sub).includes('@') ? normalizeEmail(String(decoded.sub)) : `user_${decoded.userId || decoded.sub || 'user'}@polarlist.local`);
         let user: { id: number; email: string; mother_id?: string; company_name?: string } | undefined;
         try {
           user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?')
@@ -314,11 +367,27 @@ export function validateSession(token: string | undefined | null): SessionUser |
         try { getUserApiKey(effectiveUserId, effectiveMotherId, effectiveCompanyName); } catch {}
         void persistUserToPostgres({ id: effectiveUserId, email: normEmail, password_hash: 'external_jwt_auth', mother_id: effectiveMotherId, company_name: effectiveCompanyName });
 
+        const isAdmin = isUserAdminRole(decoded);
+        const rolesList: string[] = [];
+        if (typeof decoded.roles === 'string') {
+          rolesList.push(...decoded.roles.split(',').map((r: string) => r.trim()));
+        } else if (Array.isArray(decoded.roles)) {
+          rolesList.push(...decoded.roles.map((r: any) => String(r?.authority || r?.name || r).trim()));
+        } else if (typeof decoded.role === 'string') {
+          rolesList.push(decoded.role.trim());
+        }
+        if (rolesList.length === 0) {
+          rolesList.push(isAdmin ? 'ROLE_ADMIN' : 'ROLE_USER');
+        }
+
         return {
           userId: effectiveUserId,
           email: normEmail,
           motherId: effectiveMotherId,
           companyName: effectiveCompanyName,
+          isAdmin,
+          role: isAdmin ? 'admin' : 'user',
+          roles: rolesList,
         };
       }
     } catch {
@@ -343,6 +412,9 @@ export function validateSession(token: string | undefined | null): SessionUser |
       email: row.email,
       motherId: row.mother_id || 'default',
       companyName: row.company_name || 'Default Company',
+      isAdmin: true,
+      role: 'admin',
+      roles: ['ROLE_ADMIN'],
     };
   } catch {
     return null;
