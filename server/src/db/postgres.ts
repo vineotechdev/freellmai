@@ -512,8 +512,8 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
       query += ' WHERE LOWER(mother_id) = LOWER($1)';
       params.push(motherId);
     } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-      query += ' WHERE user_id = $1 OR (LOWER(mother_id) = LOWER($2) AND is_universal = TRUE)';
-      params.push(userId, motherId);
+      query += ' WHERE LOWER(mother_id) = LOWER($1) AND (user_id = $2 OR is_universal = TRUE)';
+      params.push(motherId, userId);
     } else if (userId) {
       query += ' WHERE user_id = $1';
       params.push(userId);
@@ -547,8 +547,8 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
     // Clean up local SQLite keys for this user/tenant that were removed from PostgreSQL
     if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       const localKeys = db.prepare(
-        'SELECT id FROM api_keys WHERE user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)'
-      ).all(userId, motherId) as { id: number }[];
+        'SELECT id FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)'
+      ).all(motherId, userId) as { id: number }[];
       for (const lk of localKeys) {
         if (!pgKeyIds.has(Number(lk.id))) {
           db.prepare('DELETE FROM api_keys WHERE id = ?').run(lk.id);

@@ -35,10 +35,13 @@ export function reserveProviderCredential(
   let keys: KeyRow[] = [];
 
   if (bound) {
-    keys = db.prepare(`
-      SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-      WHERE id = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
-    `).all(row.key_id) as KeyRow[];
+    let boundQuery = 'SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys WHERE id = ? AND enabled = 1 AND status IN (\'healthy\', \'unknown\')';
+    const boundParams: any[] = [row.key_id];
+    if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      boundQuery += ' AND (LOWER(mother_id) = LOWER(?) OR mother_id IS NULL OR mother_id = \'default\')';
+      boundParams.push(motherId);
+    }
+    keys = db.prepare(boundQuery).all(...boundParams) as KeyRow[];
   } else {
     if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
       try {
@@ -60,9 +63,9 @@ export function reserveProviderCredential(
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) AND enabled = 1 AND status IN ('healthy', 'unknown')
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) AND enabled = 1 AND status IN ('healthy', 'unknown')
           ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), RANDOM()
-        `).all(row.platform, userId, motherId, userId) as KeyRow[];
+        `).all(row.platform, motherId, userId, userId) as KeyRow[];
       } catch {}
     } else if (userId) {
       try {
@@ -82,11 +85,11 @@ export function reserveProviderCredential(
       } catch {}
     }
 
-    // 3. Fallback
-    if (keys.length === 0) {
+    // 3. Fallback only if no specific tenant was requested
+    if (keys.length === 0 && (!motherId || motherId === 'default' || motherId === 'all') && !userId) {
       keys = db.prepare(`
         SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-        WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
+        WHERE platform = ? AND (mother_id IS NULL OR mother_id = 'default') AND enabled = 1 AND status IN ('healthy', 'unknown')
         ORDER BY RANDOM()
       `).all(row.platform) as KeyRow[];
     }

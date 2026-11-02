@@ -1090,8 +1090,8 @@ function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): 
     ).all(motherId) as { platform: string; count: number }[];
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     rows = db.prepare(
-      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) GROUP BY platform"
-    ).all(userId, motherId) as { platform: string; count: number }[];
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) GROUP BY platform"
+    ).all(motherId, userId) as { platform: string; count: number }[];
   } else if (userId) {
     rows = db.prepare(
       "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ? GROUP BY platform"
@@ -1102,7 +1102,7 @@ function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): 
     ).all(motherId) as { platform: string; count: number }[];
   } else {
     rows = db.prepare(
-      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id IS NULL GROUP BY platform"
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND user_id IS NULL AND (mother_id IS NULL OR mother_id = 'default') GROUP BY platform"
     ).all() as { platform: string; count: number }[];
   }
   const map = new Map(rows.map(r => [r.platform, r.count]));
@@ -1637,8 +1637,8 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
     // Sort so user's own keys are tried first, then shared universal keys.
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), id ASC"
-      ).all(entry.platform, userId, motherId, userId) as KeyRow[];
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), id ASC"
+      ).all(entry.platform, motherId, userId, userId) as KeyRow[];
     } catch {}
   } else if (userId) {
     // 3. Strict User-level keys (each user has their own separate keys)
@@ -1837,8 +1837,8 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
     keysQuery += " AND LOWER(mother_id) = LOWER(?)";
     params.push(motherId);
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))";
-    params.push(userId, motherId);
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+    params.push(motherId, userId);
   } else if (userId) {
     keysQuery += " AND user_id = ?";
     params.push(userId);
@@ -1902,15 +1902,30 @@ export function hasUsableKeyForModel(modelDbId: number, userId?: number, motherI
  * model-level bench, which needs the full key set to take a sick model out of
  * rotation, not "who could serve the next request".
  */
-export function routableKeyIdsForModel(modelDbId: number): number[] {
+export function routableKeyIdsForModel(modelDbId: number, motherId?: string, userId?: number): number[] {
   const db = getDb();
   const m = db.prepare('SELECT platform, model_id, key_id FROM models WHERE id = ?')
     .get(modelDbId) as { platform: string; model_id: string; key_id: number | null } | undefined;
   if (!m) return [];
 
-  const keys = db.prepare(
-    "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')"
-  ).all(m.platform) as { id: number; model_scope_json: string | null }[];
+  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  let keysQuery = "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')";
+  const params: any[] = [m.platform];
+  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keysQuery += " AND LOWER(mother_id) = LOWER(?)";
+    params.push(motherId);
+  } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+    params.push(motherId, userId);
+  } else if (userId) {
+    keysQuery += " AND user_id = ?";
+    params.push(userId);
+  } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)";
+    params.push(motherId);
+  }
+
+  const keys = db.prepare(keysQuery).all(...params) as { id: number; model_scope_json: string | null }[];
 
   const endpointKeyIds = m.platform === 'custom' && m.key_id != null
     ? customEndpointKeyIds(db, m.key_id)

@@ -314,7 +314,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
           />
           <label htmlFor="add-key-is-universal" className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
             <span className="font-medium text-foreground">Make Universal Key</span>
-            <span>(shared across company users with same Mother ID)</span>
+            <span>(shared across company users with same Compnay)</span>
           </label>
         </div>
       </form>

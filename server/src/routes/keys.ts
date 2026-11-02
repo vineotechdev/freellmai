@@ -418,7 +418,7 @@ keysRouter.get('/', async (req: Request, res: Response) => {
     // Company Universal Keys enabled: pool all keys belonging to this company (strictly isolated by mother_id)
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
   } else if (userId) {
-    rows = db.prepare('SELECT * FROM api_keys WHERE (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1)) ORDER BY created_at DESC').all(userId, motherId) as any[];
+    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) ORDER BY created_at DESC').all(motherId, userId) as any[];
   } else {
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
   }

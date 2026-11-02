@@ -37,3 +37,4 @@ export function down(db: Db): void {
     db.prepare('DROP TABLE IF EXISTS ai_tenant_details').run();
   } catch {}
 }
+
