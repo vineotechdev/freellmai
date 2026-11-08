@@ -331,26 +331,48 @@ function toGeminiToolConfig(toolChoice?: ChatToolChoice): { functionCallingConfi
   };
 }
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB cap on fetched/inlined images
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024; // 30 MB cap on fetched/inlined media (images, PDFs, videos)
 
-// Pull the URL out of an OpenAI image content block. Accepts both the object
-// form `{ image_url: { url } }` and the shorthand `{ image_url: '...' }`.
-function extractImageUrl(block: unknown): string | undefined {
-  const iu = (block as { image_url?: unknown })?.image_url;
-  if (typeof iu === 'string') return iu;
-  if (iu && typeof (iu as { url?: unknown }).url === 'string') return (iu as { url: string }).url;
-  return undefined;
+// Pull the URL and MIME type out of an OpenAI multimodal content block. Accepts:
+// `{ image_url: { url } }`, `{ image_url: '...' }`, `{ file: { url, mime_type } }`,
+// `{ document: { url, mime_type } }`, `{ video_url: { url } }`, or direct `{ url }`.
+function extractMediaBlock(block: unknown): { url: string; mimeType?: string } | undefined {
+  if (!block || typeof block !== 'object') return undefined;
+  const b = block as Record<string, any>;
+  let url: string | undefined;
+  let mimeType: string | undefined = b.mime_type || b.mimeType || b.media_type;
+
+  if (typeof b.image_url === 'string') {
+    url = b.image_url;
+  } else if (b.image_url && typeof b.image_url.url === 'string') {
+    url = b.image_url.url;
+  } else if (b.file && typeof b.file.url === 'string') {
+    url = b.file.url;
+    mimeType = mimeType || b.file.mime_type || b.file.mimeType;
+  } else if (b.document && typeof b.document.url === 'string') {
+    url = b.document.url;
+    mimeType = mimeType || b.document.mime_type || b.document.mimeType;
+  } else if (typeof b.video_url === 'string') {
+    url = b.video_url;
+  } else if (b.video_url && typeof b.video_url.url === 'string') {
+    url = b.video_url.url;
+  } else if (typeof b.url === 'string') {
+    url = b.url;
+  }
+
+  if (!url) return undefined;
+  return { url, mimeType };
 }
 
-// Convert an image URL to a Gemini inlineData part. Handles base64 `data:` URLs
+// Convert a media URL (image, PDF, video) to a Gemini inlineData part. Handles base64 `data:` URLs
 // directly; for `http(s)` URLs we fetch and inline because the Gemini API does
 // not fetch external URLs itself. Fetching a user-supplied URL is a minor SSRF
 // surface, acceptable for a single-user self-hosted proxy; we still restrict to
 // http/https and cap the size. Returns null (part skipped) on any failure.
-async function imageUrlToInlineData(url: string): Promise<{ mimeType: string; data: string } | null> {
+async function imageUrlToInlineData(url: string, declaredMimeType?: string): Promise<{ mimeType: string; data: string } | null> {
   const dataMatch = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(url);
   if (dataMatch) {
-    const mimeType = dataMatch[1] || 'application/octet-stream';
+    const mimeType = declaredMimeType || dataMatch[1] || 'application/octet-stream';
     const isBase64 = Boolean(dataMatch[2]);
     const payload = dataMatch[3] ?? '';
     const data = isBase64
@@ -360,15 +382,29 @@ async function imageUrlToInlineData(url: string): Promise<{ mimeType: string; da
   }
   if (/^https?:\/\//i.test(url)) {
     try {
-      // Internal helper that turns an image URL into inline data for the
-      // Gemini request body. No formal timeout — relies on the platform's
-      // own default. Use a 30s cap to avoid hanging the whole request when
-      // an image host stalls; classify as `image` for triage.
-      const res = await proxyFetch(url, { signal: AbortSignal.timeout(30_000) }, 'google', 'image', 30_000);
+      // Internal helper that turns a media URL into inline data for the
+      // Gemini request body. Classify as `media` with 60s timeout for larger documents/videos.
+      const reqType = declaredMimeType?.startsWith('video/') ? ('video' as const) : ('image' as const);
+      const res = await proxyFetch(url, { signal: AbortSignal.timeout(60_000) }, 'google', reqType, 60_000);
       if (!res.ok) return null;
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length === 0 || buf.length > MAX_IMAGE_BYTES) return null;
-      const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg';
+
+      let mimeType = declaredMimeType || res.headers.get('content-type')?.split(';')[0]?.trim();
+      // Infer MIME type from URL file extension if content-type header is octet-stream or missing
+      if (!mimeType || mimeType === 'application/octet-stream' || mimeType === 'binary/octet-stream') {
+        const cleanUrl = url.split('?')[0].toLowerCase();
+        if (cleanUrl.endsWith('.pdf')) mimeType = 'application/pdf';
+        else if (cleanUrl.endsWith('.png')) mimeType = 'image/png';
+        else if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) mimeType = 'image/jpeg';
+        else if (cleanUrl.endsWith('.webp')) mimeType = 'image/webp';
+        else if (cleanUrl.endsWith('.gif')) mimeType = 'image/gif';
+        else if (cleanUrl.endsWith('.mp4')) mimeType = 'video/mp4';
+        else if (cleanUrl.endsWith('.webm')) mimeType = 'video/webm';
+        else if (cleanUrl.endsWith('.mov')) mimeType = 'video/quicktime';
+        else mimeType = 'application/octet-stream';
+      }
+
       return { mimeType, data: buf.toString('base64') };
     } catch {
       return null;
@@ -377,7 +413,7 @@ async function imageUrlToInlineData(url: string): Promise<{ mimeType: string; da
   return null;
 }
 
-// Build Gemini parts for a user message: joined text first, then any images as
+// Build Gemini parts for a user message: joined text first, then any images/PDFs/videos as
 // inlineData. Non-array content (string/null) collapses to a single text part.
 async function userContentToParts(content: ChatMessage['content']): Promise<GeminiPart[]> {
   const parts: GeminiPart[] = [];
@@ -387,10 +423,10 @@ async function userContentToParts(content: ChatMessage['content']): Promise<Gemi
   if (Array.isArray(content)) {
     for (const block of content) {
       const type = (block as { type?: string })?.type;
-      if (type !== 'image_url' && type !== 'image') continue;
-      const url = extractImageUrl(block);
-      if (!url) continue;
-      const inlineData = await imageUrlToInlineData(url);
+      if (type !== 'image_url' && type !== 'image' && type !== 'file' && type !== 'document' && type !== 'video_url') continue;
+      const media = extractMediaBlock(block);
+      if (!media) continue;
+      const inlineData = await imageUrlToInlineData(media.url, media.mimeType);
       if (inlineData) parts.push({ inlineData });
     }
   }
