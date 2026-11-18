@@ -31,6 +31,24 @@ export function up(db: Db): void {
       0,
       1
     );
+
+    const modelRow = db.prepare("SELECT id FROM models WHERE platform = '100milionseek' AND model_id = 'deepseek-v4.1-flash-free'").get() as { id: number } | undefined;
+    if (modelRow) {
+      const fbExists = db.prepare("SELECT 1 FROM fallback_config WHERE model_db_id = ?").get(modelRow.id);
+      if (!fbExists) {
+        const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+        db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)').run(modelRow.id, maxPriority + 1);
+      }
+      const profiles = db.prepare("SELECT id FROM profiles WHERE auto_include_new_models = 1").all() as { id: number }[];
+      const pmExists = db.prepare("SELECT 1 FROM profile_models WHERE profile_id = ? AND model_db_id = ?");
+      const pmMaxPriority = db.prepare("SELECT COALESCE(MAX(priority), 0) AS mx FROM profile_models WHERE profile_id = ?");
+      for (const p of profiles) {
+        if (!pmExists.get(p.id, modelRow.id)) {
+          const mx = (pmMaxPriority.get(p.id) as { mx: number }).mx;
+          db.prepare('INSERT INTO profile_models (profile_id, model_db_id, priority, enabled) VALUES (?, ?, ?, 1)').run(p.id, modelRow.id, mx + 1);
+        }
+      }
+    }
   } catch (err: any) {
     console.warn('[migration] Could not seed 100milionseek models:', err.message);
   }

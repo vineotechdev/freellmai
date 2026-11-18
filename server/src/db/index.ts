@@ -252,6 +252,43 @@ export function initDb(
     }
   } catch {}
 
+  // Ensure all enabled models have entries in fallback_config and profile_models for auto routing
+  try {
+    const missing = db.prepare(`
+      SELECT m.id FROM models m
+      LEFT JOIN fallback_config f ON m.id = f.model_db_id
+      WHERE f.id IS NULL AND m.enabled = 1
+      ORDER BY m.intelligence_rank ASC
+    `).all() as { id: number }[];
+    if (missing.length > 0) {
+      const maxPriority = (db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM fallback_config').get() as { mx: number }).mx;
+      const addFb = db.prepare('INSERT INTO fallback_config (model_db_id, priority, enabled) VALUES (?, ?, 1)');
+      for (let i = 0; i < missing.length; i++) {
+        addFb.run(missing[i].id, maxPriority + i + 1);
+      }
+    }
+    const profiles = db.prepare('SELECT id FROM profiles WHERE auto_include_new_models = 1').all() as { id: number }[];
+    if (profiles.length > 0) {
+      const pmMissing = db.prepare(`
+        SELECT f.model_db_id FROM fallback_config f
+        LEFT JOIN profile_models pm ON pm.profile_id = ? AND pm.model_db_id = f.model_db_id
+        WHERE pm.id IS NULL
+        ORDER BY f.priority ASC
+      `);
+      const pmMax = db.prepare('SELECT COALESCE(MAX(priority), 0) AS mx FROM profile_models WHERE profile_id = ?');
+      const pmInsert = db.prepare('INSERT INTO profile_models (profile_id, model_db_id, priority, enabled) VALUES (?, ?, ?, 1)');
+      for (const p of profiles) {
+        const rows = pmMissing.all(p.id) as { model_db_id: number }[];
+        if (rows.length > 0) {
+          const mx = (pmMax.get(p.id) as { mx: number }).mx;
+          rows.forEach((r, idx) => {
+            pmInsert.run(p.id, r.model_db_id, mx + idx + 1);
+          });
+        }
+      }
+    }
+  } catch {}
+
   return db;
 }
 
