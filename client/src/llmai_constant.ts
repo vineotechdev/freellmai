@@ -41,7 +41,16 @@ export function getBackendBaseUrl(): string {
     ''
   ).trim();
 
-  return envUrl.replace(/\/$/, '');
+  if (envUrl) {
+    return envUrl.replace(/\/$/, '');
+  }
+
+  // When loaded on production frontend domain ai.polarlist.in, route directly to the backend API
+  if (typeof window !== 'undefined' && window.location.hostname === 'ai.polarlist.in') {
+    return 'https://polaraimodel.polarlist.in';
+  }
+
+  return '';
 }
 
 export const BACKEND_URL = getBackendBaseUrl();

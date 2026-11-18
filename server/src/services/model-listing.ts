@@ -65,14 +65,15 @@ export function buildModelListing(userId?: number, motherId?: string): ModelList
   }
   const isUniv = motherId ? isCompanyUniversalKeys(motherId) : false;
   let userKeyFilter = '';
+  const escapedMotherId = motherId ? `'${motherId.replace(/'/g, "''")}'` : "''";
   if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)})`;
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId})`;
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND (k.user_id = ${Number(userId)} OR (LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND k.is_universal = 1))`;
+    userKeyFilter = ` AND (k.user_id = ${Number(userId)} OR (LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.is_universal = 1))`;
   } else if (userId) {
     userKeyFilter = ` AND k.user_id = ${Number(userId)}`;
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${JSON.stringify(motherId)}) AND (k.user_id IS NULL OR k.is_universal = 1)`;
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND (k.user_id IS NULL OR k.is_universal = 1)`;
   }
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (

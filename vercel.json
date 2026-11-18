@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://polaraimodel.polarlist.in/api/$1"
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": "https://polaraimodel.polarlist.in/v1/$1"
+    },
+    {
+      "source": "/v1beta/(.*)",
+      "destination": "https://polaraimodel.polarlist.in/v1beta/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
