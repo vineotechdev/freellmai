@@ -254,6 +254,7 @@ export function initDb(
 
   // Ensure all enabled models have entries in fallback_config and profile_models for auto routing
   try {
+    db.prepare("UPDATE models SET supports_vision = 1 WHERE platform = '100milionseek'").run();
     const missing = db.prepare(`
       SELECT m.id FROM models m
       LEFT JOIN fallback_config f ON m.id = f.model_db_id

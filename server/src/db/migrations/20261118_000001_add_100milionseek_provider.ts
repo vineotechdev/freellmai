@@ -28,7 +28,7 @@ export function up(db: Db): void {
       '~3B (100M/day)',
       198000,
       1,
-      0,
+      1, // supports_vision: 1 (multimodal / image analysis supported)
       1
     );
 
