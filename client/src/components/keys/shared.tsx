@@ -96,6 +96,7 @@ export const PLATFORMS: { value: Platform; label: string; url: string; keyless?:
   // CATALOG-ANYAPI-SMOKE-2026-08-10 in the ops repo). No quota claim until
   // their free tier demonstrably works.
   { value: 'anyapi', label: 'AnyAPI (free key)', url: 'https://anyapi.ai' },
+  { value: '100milionseek', label: '100milionseek (free 100M tokens/day)', url: 'https://100milionseek.top' },
   { value: 'modelscope', label: 'ModelScope (free key, needs Aliyun cn binding)', url: 'https://modelscope.cn/my/myaccesstoken' },
   { value: 'aihorde', label: 'AI Horde (no key needed, slow)', url: 'https://aihorde.net/register', keyless: true },
   // Chinese domestic providers. All four gate API access behind real-name

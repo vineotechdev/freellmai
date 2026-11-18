@@ -148,6 +148,15 @@ register(new OpenAICompatProvider({
   baseUrl: 'https://api.anyapi.ai/v1',
 }));
 
+// 100milionseek — OpenAI-compatible provider (100milionseek.top). Free tier
+// gives 100,000,000 tokens/day per account (resets 00:00 UTC). Up to 5 concurrent
+// requests. Model: deepseek-v4.1-flash-free (198K context, 64K max output).
+register(new OpenAICompatProvider({
+  platform: '100milionseek',
+  name: '100milionseek',
+  baseUrl: 'https://100milionseek.top/v1',
+}));
+
 // AMD Radeon Cloud TokenFactory — the shared Model API is OpenAI-compatible
 // and its current public roster is free without consuming GPU-instance
 // credits. Public models are experimental and may rotate, so their ids remain

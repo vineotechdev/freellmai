@@ -50,6 +50,8 @@ import * as multiTenantMotherId from '../migrations/20261031_000001_multi_tenant
 import * as userScopedApiKeys from '../migrations/20261031_000002_user_scoped_api_keys.js';
 import * as uniqueMotherIdAndEmail from '../migrations/20261101_000001_unique_mother_id_and_email.js';
 import * as universalApiKeys from '../migrations/20261102_000001_universal_api_keys.js';
+import * as aiTenantDetails from '../migrations/20261102_000002_ai_tenant_details.js';
+import * as add100MilionSeekProvider from '../migrations/20261118_000001_add_100milionseek_provider.js';
 
 export interface MigrationModule {
   up(db: Db): void;
@@ -112,6 +114,8 @@ export const MULTI_TENANT_MOTHER_ID_FILENAME = '20261031_000001_multi_tenant_mot
 export const USER_SCOPED_API_KEYS_FILENAME = '20261031_000002_user_scoped_api_keys.ts';
 export const UNIQUE_MOTHER_ID_AND_EMAIL_FILENAME = '20261101_000001_unique_mother_id_and_email.ts';
 export const UNIVERSAL_API_KEYS_FILENAME = '20261102_000001_universal_api_keys.ts';
+export const AI_TENANT_DETAILS_FILENAME = '20261102_000002_ai_tenant_details.ts';
+export const ADD_100MILIONSEEK_PROVIDER_FILENAME = '20261118_000001_add_100milionseek_provider.ts';
 
 export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: LEGACY_BASELINE_FILENAME, module: legacyBaseline },
@@ -165,4 +169,6 @@ export const DEFAULT_MIGRATIONS: readonly DefaultMigration[] = [
   { filename: USER_SCOPED_API_KEYS_FILENAME, module: userScopedApiKeys },
   { filename: UNIQUE_MOTHER_ID_AND_EMAIL_FILENAME, module: uniqueMotherIdAndEmail },
   { filename: UNIVERSAL_API_KEYS_FILENAME, module: universalApiKeys },
+  { filename: AI_TENANT_DETAILS_FILENAME, module: aiTenantDetails },
+  { filename: ADD_100MILIONSEEK_PROVIDER_FILENAME, module: add100MilionSeekProvider },
 ];

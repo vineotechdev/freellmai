@@ -19,6 +19,7 @@
 | `cerebras` | Cerebras | 带密钥 | OpenAI 兼容 | `api.cerebras.ai/v1`。 |
 | `bai` | B.AI | 带密钥 | OpenAI 兼容 | #918 加入的网关；目录里唯一的一行是限时 0 额度促销，保留在托管目录中。 |
 | `anyapi` | AnyAPI | 带密钥 | OpenAI 兼容 | 免费档 $0 / 无需信用卡 / 不循环扣费，上限为「免费和基础」模型每日 10 万词元；未公布 RPM/RPD（#772）。模型 id 经由目录同步送达，绝不盲目播种。 |
+| `100milionseek` | 100milionseek | 带密钥 | OpenAI 兼容 | 免费档每日提供 1 亿 tokens（`100milionseek.top/v1`，00:00 UTC 重置，最多 5 个并发请求）。提供 `deepseek-v4.1-flash-free`（198K 上下文，64K 输出）。 |
 | `nvidia` | NVIDIA NIM | 带密钥 | OpenAI 兼容 | `parallel_tool_calls` 固定为 false（#255）；180s 超时兼任流式首字节宽限（#584）。 |
 | `mistral` | Mistral | 带密钥 | OpenAI 兼容 | `api.mistral.ai/v1`。 |
 | `sambanova` | SambaNova | 已退役（V23） | 未注册 | 免费额度永久消失；因历史密钥行而保留在类型联合中。 |

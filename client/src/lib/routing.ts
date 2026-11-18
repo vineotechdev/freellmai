@@ -470,6 +470,7 @@ export const platformColors: Record<string, string> = {
   unorouter:   '#ec4899',
   xkiro:       '#a855f7',
   anyapi:      '#0891b2',
+  '100milionseek': '#0284c7',
   modelscope:  '#624aff',
   aihorde:     '#dc2626',
   qianfan:     '#2932e1',

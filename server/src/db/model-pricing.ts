@@ -132,6 +132,9 @@ export const MODEL_PRICING: PricingRow[] = [
   ['ollama', 'nemotron-3-super', 0.09, 0.45],
   ['ollama', 'nemotron-3-ultra', 0.50, 2.50],
 
+  // 100milionseek
+  ['100milionseek', 'deepseek-v4.1-flash-free', 0.098, 0.197],
+
   // OpenCode Zen (big-pickle is stealth — no equivalent; V24 rows priced at
   // the OpenRouter paid variants, snapshot 2026-06-07)
   ['opencode', 'big-pickle', null, null],

@@ -128,6 +128,10 @@ export type Platform =
   // published. Catalog rows live in the hosted catalog (premium now, free after
   // 30 days).
   | 'anyapi'
+  // 100milionseek — OpenAI-compatible provider (100milionseek.top). Free tier:
+  // 100,000,000 tokens/day per account (resets 00:00 UTC). Up to 5 concurrent
+  // requests. Serves DeepSeek V4.1 Flash Free (198K context, 64K max output).
+  | '100milionseek'
   // AMD Radeon Cloud TokenFactory — OpenAI-compatible shared inference. Its
   // rotating public-model roster is free without consuming instance credits,
   // with recurring account-level allowance and request/concurrency controls.
