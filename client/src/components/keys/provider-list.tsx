@@ -79,7 +79,7 @@ const METRIC_LABEL_KEY = {
 // The Providers tab body: a filter toolbar over a list of collapsible provider
 // groups. Owns the keys/health/proxy queries and every per-key mutation so
 // KeysPage stays a thin shell. `onAddKey` opens the shared Add key dialog.
-export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
+export function ProviderList({ onAddKey, canAddKey = true }: { onAddKey: () => void; canAddKey?: boolean }) {
   const { t, locale } = useI18n()
   const queryClient = useQueryClient()
 
@@ -417,10 +417,12 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
         icon={KeyRound}
         title={t('keys.noProviderKeys')}
         action={
-          <Button size="sm" onClick={onAddKey}>
-            <Plus className="size-3.5" />
-            {t('keys.addKey')}
-          </Button>
+          canAddKey ? (
+            <Button size="sm" onClick={onAddKey}>
+              <Plus className="size-3.5" />
+              {t('keys.addKey')}
+            </Button>
+          ) : undefined
         }
       />
     )
@@ -545,7 +547,7 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                             <Copy className="ml-auto size-3.5" />
                           </DropdownMenuItem>
                         )}
-                        {!group.search && (
+                        {!group.search && canAddKey && (
                           <DropdownMenuItem onClick={() => setAddModelTarget({ platform: group.platform })}>
                             {t('keys.addCustomModel')}
                             <Sparkles className="ml-auto size-3.5" />
@@ -704,7 +706,7 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                             )}
                             <code className={`text-xs font-mono flex-shrink-0 ${k.enabled ? '' : 'opacity-50'}`}>{k.maskedKey}</code>
                             {k.isUniversal && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase bg-muted text-foreground border border-border flex items-center gap-1">
                                 Universal
                               </span>
                             )}
@@ -818,16 +820,18 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                               )}
                               {k.platform === 'custom' && k.baseUrl && (
                                 <>
-                                  <Tooltip text={t('keys.addKey')}>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      onClick={() => setAddKeyBaseUrl(k.baseUrl!)}
-                                      aria-label={t('keys.addKey')}
-                                    >
-                                      <KeyRound className="size-3" />
-                                    </Button>
-                                  </Tooltip>
+                                  {canAddKey && (
+                                    <Tooltip text={t('keys.addKey')}>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => setAddKeyBaseUrl(k.baseUrl!)}
+                                        aria-label={t('keys.addKey')}
+                                      >
+                                        <KeyRound className="size-3" />
+                                      </Button>
+                                    </Tooltip>
+                                  )}
                                   <Tooltip text={t('keys.discoverModels')}>
                                     <Button
                                       variant="ghost"
@@ -838,16 +842,18 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                                       <ListPlus className="size-3" />
                                     </Button>
                                   </Tooltip>
-                                  <Tooltip text={t('keys.addCustomModel')}>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      onClick={() => setAddModelTarget({ platform: 'custom', keyId: k.id })}
-                                      aria-label={t('keys.addCustomModel')}
-                                    >
-                                      <Sparkles className="size-3" />
-                                    </Button>
-                                  </Tooltip>
+                                  {canAddKey && (
+                                    <Tooltip text={t('keys.addCustomModel')}>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-xs"
+                                        onClick={() => setAddModelTarget({ platform: 'custom', keyId: k.id })}
+                                        aria-label={t('keys.addCustomModel')}
+                                      >
+                                        <Sparkles className="size-3" />
+                                      </Button>
+                                    </Tooltip>
+                                  )}
                                   <Tooltip text={t('keys.testModels')}>
                                     <Button
                                       variant="ghost"

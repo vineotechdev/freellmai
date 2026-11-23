@@ -366,10 +366,26 @@ export function validateSession(token: string | undefined | null): SessionUser |
           } catch {}
         }
 
+        const d = decoded as any;
+        const tokenMotherId = normalizeMotherId(String(
+          d.mother_id ||
+          d.motherId ||
+          d.company_id ||
+          d.companyId ||
+          (d.company && typeof d.company === 'object' ? (d.company.id || d.company.mother_id) : undefined) ||
+          (d.user && typeof d.user === 'object' ? (d.user.company_id || d.user.companyId || d.user.mother_id) : undefined) ||
+          'default'
+        ));
+        const tokenCompanyName = (
+          d.companyName ||
+          d.company_name ||
+          (d.company && typeof d.company === 'object' ? d.company.name : undefined) ||
+          'Default Company'
+        ).trim();
+
         if (!user) {
-          const rawMotherId = decoded.mother_id || decoded.motherId || 'default';
-          const motherId = normalizeMotherId(String(rawMotherId));
-          const companyName = (decoded.companyName || decoded.company_name || 'PolarList User').trim();
+          const motherId = tokenMotherId;
+          const companyName = tokenCompanyName || 'PolarList User';
           try {
             if (parsedUserId) {
               db.prepare('INSERT INTO users (id, mother_id, company_name, email, password_hash) VALUES (?, ?, ?, ?, ?)').run(
@@ -392,11 +408,21 @@ export function validateSession(token: string | undefined | null): SessionUser |
           } catch {
             user = db.prepare('SELECT id, email, mother_id, company_name FROM users WHERE email = ?').get(normEmail) as any;
           }
+        } else if (user && (!user.mother_id || user.mother_id === 'default') && tokenMotherId !== 'default') {
+          try {
+            db.prepare('UPDATE users SET mother_id = ?, company_name = COALESCE(?, company_name) WHERE id = ?').run(
+              tokenMotherId,
+              tokenCompanyName || null,
+              user.id
+            );
+            user.mother_id = tokenMotherId;
+            if (tokenCompanyName && tokenCompanyName !== 'Default Company') user.company_name = tokenCompanyName;
+          } catch {}
         }
 
         const effectiveUserId = user ? user.id : (parsedUserId || 1);
-        const effectiveMotherId = (user && user.mother_id) || normalizeMotherId(String(decoded.mother_id || decoded.motherId || 'default'));
-        const effectiveCompanyName = (user && user.company_name) || decoded.companyName || decoded.company_name || 'Default Company';
+        const effectiveMotherId = (user && user.mother_id && user.mother_id !== 'default') ? user.mother_id : tokenMotherId;
+        const effectiveCompanyName = (user && user.company_name && user.company_name !== 'Default Company') ? user.company_name : tokenCompanyName;
 
         try { getTenantApiKey(effectiveMotherId, effectiveCompanyName); } catch {}
         try { getUserApiKey(effectiveUserId, effectiveMotherId, effectiveCompanyName); } catch {}

@@ -275,7 +275,7 @@ export function EditKeyDialog({
               type="checkbox"
               checked={isUniversal}
               onChange={e => setIsUniversal(e.target.checked)}
-              className="size-4 accent-purple-600 rounded cursor-pointer"
+              className="size-4 accent-foreground rounded cursor-pointer"
             />
             <label htmlFor="edit-key-is-universal" className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
               <span className="font-medium text-foreground">Universal Key</span>

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import { getDb } from '../db/index.js';
-import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, deleteApiKeyFromPostgres, syncApiKeysFromPostgres, isPostgresConfigured, getPostgresPool } from '../db/postgres.js';
+import { persistApiKeyToPostgres, persistApiKeyEnabledToPostgres, persistPlatformKeysEnabledToPostgres, deleteApiKeyFromPostgres, syncApiKeysFromPostgres, isPostgresConfigured, getPostgresPool } from '../db/postgres.js';
 import { resolveProvider, getAllProviders } from '../providers/index.js';
 import { OpenAICompatProvider, isAnonymousCredential } from '../providers/openai-compat.js';
 import { getSyncState } from '../services/catalog-sync.js';
@@ -2127,7 +2127,7 @@ keysRouter.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
 });
 
 // Toggle all keys for a platform
-keysRouter.patch('/platform/:platform', (req: Request, res: Response) => {
+keysRouter.patch('/platform/:platform', async (req: Request, res: Response) => {
   const platform = req.params.platform as string;
   if (!(PLATFORMS as readonly string[]).includes(platform)) {
     res.status(400).json({ error: { message: `Invalid platform '${platform}'` } });
@@ -2178,24 +2178,41 @@ keysRouter.patch('/platform/:platform', (req: Request, res: Response) => {
           ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ? AND LOWER(mother_id) = LOWER(?)").run(enabled ? 1 : 0, groupLabel, motherId)
           : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ?").run(enabled ? 1 : 0, groupLabel));
 
+  await persistPlatformKeysEnabledToPostgres(platform, enabled ? 1 : 0, hasTenant ? motherId : undefined);
+
   res.json({ success: true, enabled, updatedKeys: result.changes });
 });
 
 // GET /api/keys/company-settings - Get company universal keys policy from central ai_tenant_details
-const handleGetCompanySettings = (req: Request, res: Response) => {
+const handleGetCompanySettings = async (req: Request, res: Response) => {
   const user = (req as any).user;
-  const rawMotherId = req.query.motherId
+  const userId = user?.userId;
+  let rawMotherId = req.query.motherId
     ? normalizeMotherId(String(req.query.motherId))
     : (req.body?.motherId
       ? normalizeMotherId(String(req.body.motherId))
       : (user?.motherId || 'default'));
+  if (userId && (!rawMotherId || rawMotherId === 'default' || rawMotherId === 'all')) {
+    rawMotherId = resolveMotherIdForUser(userId, rawMotherId) || 'default';
+  }
   const motherId = normalizeMotherId(rawMotherId);
+
+  if (isPostgresConfigured()) {
+    try {
+      await syncApiKeysFromPostgres(getDb(), userId, motherId);
+    } catch {}
+  }
+
   const universal = isCompanyUniversalKeys(motherId);
+  const isPrivate = isCompanyPrivateMode(motherId);
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
   const details = getCompanyTenantDetails(motherId);
   res.json({
     motherId,
     companyName: details?.companyName || user?.companyName || 'Default Company',
-    universalKeys: universal,
+    universalKeys: universal || isPrivate,
+    privateMode: isPrivate,
+    isAdmin: isAdminUser,
     updatedAt: details?.updatedAt,
   });
 };
@@ -2422,7 +2439,7 @@ keysRouter.post('/set-private-mode', handleUpdateCompanyPrivateMode);
 keysRouter.patch('/set-private-mode', handleUpdateCompanyPrivateMode);
 
 // Update key (toggle enable/disable or edit label)
-keysRouter.patch('/:id', (req: Request, res: Response, next: NextFunction) => {
+keysRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) {
     return next();
@@ -2572,11 +2589,11 @@ keysRouter.patch('/:id', (req: Request, res: Response, next: NextFunction) => {
     return;
   }
 
-  if (enabled !== undefined) void persistApiKeyEnabledToPostgres(id, enabled ? 1 : 0);
+  if (enabled !== undefined) await persistApiKeyEnabledToPostgres(id, enabled ? 1 : 0);
   if (updateIsUniversal !== undefined) {
     const p = getPostgresPool();
     if (p) {
-      void p.query('UPDATE ai_api_keys SET is_universal = $1 WHERE id = $2', [updateIsUniversal, id]);
+      await p.query('UPDATE ai_api_keys SET is_universal = $1 WHERE id = $2', [updateIsUniversal, id]);
     }
   }
   if (changedKey !== undefined) clearCooldownsForKey(id);

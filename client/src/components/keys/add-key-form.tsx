@@ -49,10 +49,18 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
   const [several, setSeveral] = useState(false)
   const [isUniversal, setIsUniversal] = useState(true)
 
-  const { data: companySettings } = useQuery<{ motherId: string; universalKeys: boolean }>({
+  const { data: companySettings } = useQuery<{
+    motherId: string;
+    companyName?: string;
+    universalKeys: boolean;
+    privateMode?: boolean;
+    isAdmin?: boolean;
+  }>({
     queryKey: ['company-settings'],
     queryFn: () => apiFetch('/api/keys/company-settings'),
   })
+
+  const isBlockedByPrivateMode = Boolean(companySettings?.privateMode && !companySettings?.isAdmin)
 
   useEffect(() => {
     if (companySettings?.universalKeys !== undefined) {
@@ -199,6 +207,11 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
 
   return (
     <div>
+      {isBlockedByPrivateMode && (
+        <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <strong>Key addition disabled:</strong> Company AI Private Mode is enabled by your administrator. Standard members cannot add or store personal API keys. All queries use company universal keys.
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex flex-wrap gap-3">
         <div className="space-y-1.5">
           <Label className="text-xs">{t('keys.platform')}</Label>
@@ -295,7 +308,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
               placeholder={t('keys.customDisplayNameOptional')}
               className="w-[160px]"
             />
-            <Button type="submit" size="sm" disabled={pending}>
+            <Button type="submit" size="sm" disabled={pending || isBlockedByPrivateMode}>
               {pending
                 ? t('keys.adding')
                 : severalMode && keyList.length > 1
@@ -310,11 +323,12 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
             type="checkbox"
             checked={isUniversal}
             onChange={e => setIsUniversal(e.target.checked)}
-            className="size-4 accent-purple-600 rounded cursor-pointer"
+            disabled={companySettings?.privateMode}
+            className="size-4 accent-foreground rounded cursor-pointer"
           />
           <label htmlFor="add-key-is-universal" className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
             <span className="font-medium text-foreground">Make Universal Key</span>
-            <span>(shared across company users with same Compnay)</span>
+            <span>(shared across all members of {companySettings?.companyName || 'your company'})</span>
           </label>
         </div>
       </form>

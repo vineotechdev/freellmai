@@ -480,27 +480,44 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
     }
 
     let isUniv = false;
+    let isPriv = false;
     if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
-        // Query PostgreSQL ai_tenant_details for central mother_id universal setting
-        const tdRow = await p.query('SELECT universal_keys, company_name FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER($1) LIMIT 1', [motherId]);
+        // Query PostgreSQL ai_tenant_details and company_settings for central universal and private_mode settings
+        const tdRow = await p.query(`
+          SELECT t.universal_keys, t.private_mode, t.company_name,
+                 cs.enable_private_mode, cs.universal_ai_keys
+            FROM ai_tenant_details t
+            FULL OUTER JOIN company_settings cs ON cs.company_id::text = t.mother_id
+           WHERE LOWER(COALESCE(t.mother_id, cs.company_id::text)) = LOWER($1)
+           LIMIT 1
+        `, [motherId]);
+
         if (tdRow.rows.length > 0) {
-          isUniv = tdRow.rows[0].universal_keys === true || tdRow.rows[0].universal_keys === 1 || String(tdRow.rows[0].universal_keys) === 'true';
+          const row = tdRow.rows[0];
+          isPriv = row.private_mode === true || row.private_mode === 1 || String(row.private_mode) === 'true' || row.enable_private_mode === true || row.enable_private_mode === 1 || String(row.enable_private_mode) === 'true';
+          isUniv = isPriv || row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true' || row.universal_ai_keys === true || row.universal_ai_keys === 1 || String(row.universal_ai_keys) === 'true';
+          const compName = row.company_name || null;
           try {
             db.prepare(`
-              INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, updated_at)
-              VALUES (?, ?, ?, datetime('now'))
+              INSERT INTO ai_tenant_details (mother_id, company_name, private_mode, universal_keys, updated_at)
+              VALUES (?, ?, ?, ?, datetime('now'))
               ON CONFLICT(mother_id) DO UPDATE SET
+                private_mode = excluded.private_mode,
                 universal_keys = excluded.universal_keys,
                 company_name = COALESCE(excluded.company_name, ai_tenant_details.company_name),
                 updated_at = datetime('now')
-            `).run(motherId, tdRow.rows[0].company_name || null, isUniv ? 1 : 0);
+            `).run(motherId, compName, isPriv ? 1 : 0, isUniv ? 1 : 0);
+
+            db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+              .run(`private_mode_${String(motherId).trim().toLowerCase()}`, isPriv ? 'true' : 'false');
           } catch {}
         } else {
           // Fallback to SQLite check
-          const sRow = db.prepare('SELECT universal_keys FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(motherId) as any;
+          const sRow = db.prepare('SELECT universal_keys, private_mode FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(motherId) as any;
           if (sRow) {
-            isUniv = sRow.universal_keys === 1 || sRow.universal_keys === true || String(sRow.universal_keys) === 'true';
+            isPriv = sRow.private_mode === 1 || sRow.private_mode === true || String(sRow.private_mode) === 'true';
+            isUniv = isPriv || sRow.universal_keys === 1 || sRow.universal_keys === true || String(sRow.universal_keys) === 'true';
           }
         }
       } catch {}
@@ -861,6 +878,24 @@ export async function persistApiKeyEnabledToPostgres(keyId: number, enabled: num
     await p.query('UPDATE ai_api_keys SET enabled = $1 WHERE id = $2', [enabled, keyId]);
   } catch (err: any) {
     console.error('[PostgreSQL] Failed to persist api key enabled state:', err.message);
+  }
+}
+
+/**
+ * Updates all API keys for a platform in PostgreSQL ai_api_keys immediately.
+ */
+export async function persistPlatformKeysEnabledToPostgres(platform: string, enabled: number, motherId?: string | null): Promise<void> {
+  const p = getPostgresPool();
+  if (!p || !isInitialized) return;
+
+  try {
+    if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      await p.query('UPDATE ai_api_keys SET enabled = $1 WHERE platform = $2 AND LOWER(mother_id) = LOWER($3)', [enabled, platform, motherId]);
+    } else {
+      await p.query('UPDATE ai_api_keys SET enabled = $1 WHERE platform = $2', [enabled, platform]);
+    }
+  } catch (err: any) {
+    console.error('[PostgreSQL] Failed to persist platform api keys enabled state:', err.message);
   }
 }
 

@@ -61,10 +61,18 @@ export default function KeysPage() {
     queryFn: () => apiFetch('/api/keys'),
   })
 
-  const { data: companySettings } = useQuery<{ motherId: string; universalKeys: boolean }>({
+  const { data: companySettings } = useQuery<{
+    motherId: string;
+    companyName?: string;
+    universalKeys: boolean;
+    privateMode?: boolean;
+    isAdmin?: boolean;
+  }>({
     queryKey: ['company-settings'],
     queryFn: () => apiFetch('/api/keys/company-settings'),
   })
+
+  const canAddKey = !companySettings?.privateMode || Boolean(companySettings?.isAdmin)
 
   const { data: healthData } = useQuery<HealthData>({
     queryKey: ['health'],
@@ -98,7 +106,7 @@ export default function KeysPage() {
                 {t('keys.export')}
               </Button>
             )}
-            {tab === 'providers' && (
+            {tab === 'providers' && canAddKey && (
               <Button size="sm" onClick={() => openAddKey()}>
                 <Plus className="size-3.5" />
                 {t('keys.addKey')}
@@ -134,16 +142,28 @@ export default function KeysPage() {
 
         {tab === 'providers' && (
           <>
-            {companySettings?.universalKeys && (
-              <div className="flex items-center justify-between p-3 rounded-lg border border-purple-500/30 bg-purple-500/10 text-xs">
-                <div className="flex items-center gap-2 text-purple-300">
-                  <span className="font-semibold px-2 py-0.5 rounded bg-purple-500/20 text-purple-200">COMPANY UNIVERSAL MODE ACTIVE</span>
-                  <span>All universal keys are pooled and shared across users with Mother ID <strong className="text-foreground">{companySettings.motherId}</strong>.</span>
+            {companySettings?.privateMode && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/40 text-xs text-foreground">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold px-2 py-0.5 rounded bg-foreground text-background">COMPANY PRIVATE MODE ACTIVE</span>
+                  <span>
+                    {companySettings.isAdmin
+                      ? `Private mode is enabled for ${companySettings.companyName || 'your company'}. Standard members cannot add or store personal keys.`
+                      : `Private mode is enabled for ${companySettings.companyName || 'your company'}. Key addition is disabled for standard members. All operations use universal keys configured by administrators.`}
+                  </span>
                 </div>
               </div>
             )}
-            <ProviderChecklistSection onAddKey={platform => openAddKey(platform as Platform)} />
-            <ProviderList onAddKey={() => openAddKey()} />
+            {companySettings?.universalKeys && !companySettings?.privateMode && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/40 text-xs text-foreground">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold px-2 py-0.5 rounded bg-foreground text-background">COMPANY UNIVERSAL MODE ACTIVE</span>
+                  <span>All universal keys are pooled and shared across all members of <strong className="text-foreground">{companySettings.companyName || 'your company'}</strong>.</span>
+                </div>
+              </div>
+            )}
+            {canAddKey && <ProviderChecklistSection onAddKey={platform => openAddKey(platform as Platform)} />}
+            <ProviderList onAddKey={() => openAddKey()} canAddKey={canAddKey} />
           </>
         )}
       </div>

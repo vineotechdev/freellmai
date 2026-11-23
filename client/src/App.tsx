@@ -270,11 +270,6 @@ function TenantBanner() {
             <span>{authData.companyName || 'PolarList'}</span>
           </div>
 
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-mono text-[11px] border border-primary/25">
-            <span className="text-muted-foreground">Mother ID:</span>
-            <span className="font-bold">{authData.motherId}</span>
-          </div>
-
           {authData.email && (
             <span className="text-muted-foreground text-[11px] hidden sm:inline">
               ({authData.email})
@@ -338,11 +333,9 @@ function Navbar() {
         >
           <div className="flex items-center gap-2.5">
             <Brand />
-            {authData?.motherId && (
-              <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-secondary text-[11px] font-medium text-secondary-foreground border border-border/50">
-                <span className="font-semibold max-w-[120px] truncate">{authData.companyName || 'Tenant'}</span>
-                <span className="text-muted-foreground">•</span>
-                <span className="font-mono text-primary font-bold">{authData.motherId}</span>
+            {authData?.companyName && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-secondary text-[11px] font-medium text-secondary-foreground border border-border/50">
+                <span className="font-semibold max-w-[180px] truncate">{authData.companyName}</span>
               </span>
             )}
           </div>
