@@ -2441,10 +2441,15 @@ keysRouter.post('/company/universal', handleUpdateCompanyUniversalKeys);
 keysRouter.patch('/company/universal', handleUpdateCompanyUniversalKeys);
 
 // Dedicated endpoints for Company AI Private Mode (dual-DB sync)
+keysRouter.get('/private-mode', handleGetCompanyPrivateMode);
+keysRouter.post('/private-mode', handleUpdateCompanyPrivateMode);
+keysRouter.patch('/private-mode', handleUpdateCompanyPrivateMode);
+
 keysRouter.get('/company/private-mode', handleGetCompanyPrivateMode);
 keysRouter.post('/company/private-mode', handleUpdateCompanyPrivateMode);
 keysRouter.patch('/company/private-mode', handleUpdateCompanyPrivateMode);
-keysRouter.get('/private-mode', handleGetCompanyPrivateMode);
+
+keysRouter.get('/set-private-mode', handleGetCompanyPrivateMode);
 keysRouter.post('/set-private-mode', handleUpdateCompanyPrivateMode);
 keysRouter.patch('/set-private-mode', handleUpdateCompanyPrivateMode);
 
