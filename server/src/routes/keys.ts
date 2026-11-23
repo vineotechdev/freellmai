@@ -437,28 +437,32 @@ keysRouter.get('/', async (req: Request, res: Response) => {
   }
   const isPrivate = isCompanyPrivateMode(motherId);
   const isUniversal = isPrivate || isCompanyUniversalKeys(motherId);
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPostgresConfigured()) {
     await syncApiKeysFromPostgres(db, userId, motherId);
   }
 
   let rows: any[] = [];
-  if (isPrivate && !user?.isAdmin) {
-    // In Private Mode, retail non-admin users only have access to Universal keys added by company admin.
-    // Even if user previously entered their private keys before Private Mode was enabled, those personal keys
-    // are strictly excluded from the response so only company universal keys are visible and used.
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND is_universal = 1 ORDER BY created_at DESC').all(motherId) as any[];
-  } else if (isPrivate && user?.isAdmin) {
-    // For admins in Private Mode: list universal keys first
+  if (isAdminUser) {
+    // Company administrators can view all company keys (universal keys first, then all company-level keys)
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY is_universal DESC, created_at DESC').all(motherId) as any[];
-  } else if (isUniversal) {
-    // Company Universal Keys enabled: pool all keys belonging to this company (strictly isolated by mother_id)
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
-  } else if (userId && !user?.isAdmin) {
-    // Universal Mode deactivated: standard non-admin users only see their own keys
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND user_id = ? ORDER BY created_at DESC').all(motherId, userId) as any[];
   } else {
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
+    // Standard non-admin users:
+    // 1) Strictly send ONLY keys associated with this user's user_id
+    // 2) Never share or leak universal keys in their personal keys list ("done share universal keys just")
+    // 3) Never show keys belonging to other users in the company
+    if (userId) {
+      rows = db.prepare(`
+        SELECT * FROM api_keys 
+        WHERE LOWER(mother_id) = LOWER(?) 
+          AND user_id = ? 
+          AND (is_universal = 0 OR is_universal IS NULL) 
+        ORDER BY created_at DESC
+      `).all(motherId, userId) as any[];
+    } else {
+      rows = [];
+    }
   }
   const modelCounts = new Map<string, number>();
   const modelCountFor = (platform: string): number => {
@@ -891,6 +895,17 @@ keysRouter.post('/', async (req: Request, res: Response) => {
     }
   }
 
+  // Only company administrators can configure Universal Keys
+  if (!isAdminUser && parsed.data.isUniversal === true) {
+    res.status(403).json({
+      error: {
+        message: 'Only company administrators are authorized to add or configure Company Universal Keys.',
+        type: 'admin_required',
+      }
+    });
+    return;
+  }
+
   if (isKeyless) {
     if (isPrivate && !isAdminUser) {
       res.status(403).json({
@@ -901,11 +916,11 @@ keysRouter.post('/', async (req: Request, res: Response) => {
       });
       return;
     }
-    if (isPrivate && parsed.data.isUniversal === false) {
+    if (!isAdminUser && parsed.data.isUniversal === true) {
       res.status(403).json({
         error: {
-          message: 'Company AI Private Mode is active. Private keys cannot be stored. Keyless connections must be Universal for the company.',
-          type: 'private_keys_prohibited',
+          message: 'Only company administrators are authorized to configure Company Universal keyless connections.',
+          type: 'admin_required',
         }
       });
       return;
@@ -963,10 +978,21 @@ keysRouter.post('/', async (req: Request, res: Response) => {
   // `user:pass@` credentials. Absent/'' stores NULLs = no override.
   const proxy = encryptProxyUrl(proxyUrl);
 
-  const isCompanyUniversal = isPrivate || isCompanyUniversalKeys(motherId);
-  const isUniversal = isPrivate ? true : (parsed.data.isUniversal !== undefined ? parsed.data.isUniversal : isCompanyUniversal);
+  let isUniversal = false;
+  if (isAdminUser) {
+    if (isPrivate) {
+      isUniversal = true;
+    } else if (parsed.data.isUniversal !== undefined) {
+      isUniversal = Boolean(parsed.data.isUniversal);
+    } else {
+      isUniversal = isCompanyUniversalKeys(motherId);
+    }
+  } else {
+    // Non-admin standard users NEVER create universal keys
+    isUniversal = false;
+  }
   const isUniversalNum = isUniversal ? 1 : 0;
-  const effectiveUserId = isUniversal ? null : userId;
+  const effectiveUserId = isUniversal ? null : (userId ?? null);
 
   let keyId: number | bigint | undefined = 0;
   if (isPostgresConfigured()) {
@@ -1603,6 +1629,16 @@ keysRouter.post('/custom', async (req: Request, res: Response) => {
     }
   }
 
+  if (!isAdminUser && (parsed.data as any).isUniversal === true) {
+    res.status(403).json({
+      error: {
+        message: 'Only company administrators are authorized to add Company Universal endpoints.',
+        type: 'admin_required',
+      }
+    });
+    return;
+  }
+
   // Credential-only add (#702): a relay hands out one key per plan, and pooling
   // them is the point of #619, but every route into this handler used to demand
   // a model alongside the key. On an endpoint whose models are all registered
@@ -1663,7 +1699,9 @@ keysRouter.post('/custom', async (req: Request, res: Response) => {
   const { keyId, storedKey, registered } = registerCustomModels(
     db, baseUrl, providedKey, label, endpoint.keyId ?? undefined, pureChatEntries,
   );
-  db.prepare('UPDATE api_keys SET mother_id = ?, user_id = ? WHERE id = ?').run(motherId, userId, keyId);
+  const customIsUniversal = isAdminUser && (isPrivate || Boolean((parsed.data as any).isUniversal));
+  const customUserId = customIsUniversal ? null : (userId ?? null);
+  db.prepare('UPDATE api_keys SET mother_id = ?, user_id = ?, is_universal = ? WHERE id = ?').run(motherId, customUserId, customIsUniversal ? 1 : 0, keyId);
   if (parsed.data.groupLabel !== undefined) setCustomEndpointGroup(db, keyId, normalizeGroupLabel(parsed.data.groupLabel));
 
   const mediaRegistered: Array<{ modelDbId: number; model: string; modality: string; created: boolean }> = [];
@@ -2055,9 +2093,11 @@ keysRouter.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot delete keys.' } });
     return;
   }
-  const row = userId
-    ? db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId) as { platform: string; base_url: string | null } | undefined
-    : db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND mother_id = ? AND user_id IS NULL').get(id, motherId) as { platform: string; base_url: string | null } | undefined;
+  const row = isAdminUser
+    ? db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?)').get(id, motherId) as { platform: string; base_url: string | null } | undefined
+    : (userId
+      ? db.prepare('SELECT platform, base_url FROM api_keys WHERE id = ? AND user_id = ? AND (is_universal = 0 OR is_universal IS NULL)').get(id, userId) as { platform: string; base_url: string | null } | undefined
+      : undefined);
   if (!row) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -2167,17 +2207,30 @@ keysRouter.patch('/platform/:platform', async (req: Request, res: Response) => {
 
   const groupLabel = group === undefined ? undefined : normalizeGroupLabel(group);
   const hasTenant = motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default';
-  const result = groupLabel === undefined
-    ? (hasTenant
-        ? db.prepare('UPDATE api_keys SET enabled = ? WHERE platform = ? AND LOWER(mother_id) = LOWER(?)').run(enabled ? 1 : 0, platform, motherId)
-        : db.prepare('UPDATE api_keys SET enabled = ? WHERE platform = ?').run(enabled ? 1 : 0, platform))
-    : groupLabel === null
+  let result = { changes: 0 };
+
+  if (isAdminUser) {
+    result = groupLabel === undefined
       ? (hasTenant
-          ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label IS NULL AND LOWER(mother_id) = LOWER(?)").run(enabled ? 1 : 0, motherId)
-          : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label IS NULL").run(enabled ? 1 : 0))
-      : (hasTenant
-          ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ? AND LOWER(mother_id) = LOWER(?)").run(enabled ? 1 : 0, groupLabel, motherId)
-          : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ?").run(enabled ? 1 : 0, groupLabel));
+          ? db.prepare('UPDATE api_keys SET enabled = ? WHERE platform = ? AND LOWER(mother_id) = LOWER(?)').run(enabled ? 1 : 0, platform, motherId)
+          : db.prepare('UPDATE api_keys SET enabled = ? WHERE platform = ?').run(enabled ? 1 : 0, platform))
+      : groupLabel === null
+        ? (hasTenant
+            ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label IS NULL AND LOWER(mother_id) = LOWER(?)").run(enabled ? 1 : 0, motherId)
+            : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label IS NULL").run(enabled ? 1 : 0))
+        : (hasTenant
+            ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ? AND LOWER(mother_id) = LOWER(?)").run(enabled ? 1 : 0, groupLabel, motherId)
+            : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ?").run(enabled ? 1 : 0, groupLabel));
+  } else {
+    // Standard user can only toggle their own non-universal keys
+    if (userId) {
+      result = groupLabel === undefined
+        ? db.prepare('UPDATE api_keys SET enabled = ? WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND user_id = ? AND (is_universal = 0 OR is_universal IS NULL)').run(enabled ? 1 : 0, platform, motherId, userId)
+        : groupLabel === null
+          ? db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label IS NULL AND LOWER(mother_id) = LOWER(?) AND user_id = ? AND (is_universal = 0 OR is_universal IS NULL)").run(enabled ? 1 : 0, motherId, userId)
+          : db.prepare("UPDATE api_keys SET enabled = ? WHERE platform = 'custom' AND group_label = ? AND LOWER(mother_id) = LOWER(?) AND user_id = ? AND (is_universal = 0 OR is_universal IS NULL)").run(enabled ? 1 : 0, groupLabel, motherId, userId);
+    }
+  }
 
   await persistPlatformKeysEnabledToPostgres(platform, enabled ? 1 : 0, hasTenant ? motherId : undefined);
 
@@ -2459,13 +2512,12 @@ keysRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction)
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot modify keys.' } });
     return;
   }
-  const isUniversal = isPrivate || isCompanyUniversalKeys(motherId);
   const db = getDb();
-  const existingKey = isUniversal
+  const existingKey = isAdminUser
     ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?)').get(id, motherId)
     : (userId
-      ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId)
-      : db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL').get(id, motherId));
+      ? db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND user_id = ? AND (is_universal = 0 OR is_universal IS NULL)').get(id, userId)
+      : null);
   if (!existingKey) {
     res.status(404).json({ error: { message: 'Key not found' } });
     return;
@@ -2478,6 +2530,10 @@ keysRouter.patch('/:id', async (req: Request, res: Response, next: NextFunction)
   }
 
   const { enabled, label, isUniversal: updateIsUniversal, modelScope, proxyUrl, key, monthlyRequestCap, monthlyTokenCap, groupLabel } = parsed.data;
+  if (updateIsUniversal !== undefined && !isAdminUser) {
+    res.status(403).json({ error: { message: 'Only company administrators can modify the Universal status of a key.' } });
+    return;
+  }
   if (isPrivate && updateIsUniversal === false) {
     res.status(403).json({ error: { message: 'Company AI Private Mode is active. Keys cannot be converted to private keys.' } });
     return;
