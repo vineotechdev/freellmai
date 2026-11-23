@@ -269,6 +269,7 @@ export function createApp(config?: Config) {
   app.use('/api/keys/export', createAdminRateLimiter(EXPORT_RATE_LIMIT_RPM));
 
   app.use('/api/keys', requireAuth, keysRouter);
+  app.use('/api/company', requireAuth, keysRouter);
   // Per-client key management (#411). Dashboard-session gated like the rest of
   // /api — the profile keys it mints authenticate only the /v1 inference
   // surface and are never valid here.

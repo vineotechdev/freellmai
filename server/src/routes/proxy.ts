@@ -43,6 +43,7 @@ import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../servi
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
+import { isCompanyPrivateMode, resolveMotherIdForUser } from '../services/tenant.js';
 
 export const proxyRouter = Router();
 
@@ -395,11 +396,17 @@ proxyRouter.get(['/models/:id', '/models/*rest'], async (req: Request, res: Resp
 // rows — `auto`, `fusion` and the named chains are router entries, not models
 // with keys of their own.
 function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus?: NormalizedModel['executionStatus']; userId?: number; motherId?: string } = {}): Array<Record<string, unknown>> {
+  if (filters.userId && (!filters.motherId || filters.motherId === 'default' || filters.motherId === 'all')) {
+    filters.motherId = resolveMotherIdForUser(filters.userId, filters.motherId) ?? undefined;
+  }
+  const isPrivate = filters.motherId ? isCompanyPrivateMode(filters.motherId) : false;
   const { models: allListed, autoContextWindow } = buildModelListing(filters.userId, filters.motherId);
   const listed = filters.onlyAvailable ? allListed.filter(m => m.available === 1) : allListed;
 
   const escapedMotherId = filters.motherId ? `'${filters.motherId.replace(/'/g, "''")}'` : "''";
-  const keyFilter = filters.userId && filters.motherId
+  const keyFilter = isPrivate && filters.motherId && filters.motherId !== 'all' && filters.motherId.toLowerCase() !== 'default'
+    ? `AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.is_universal = 1`
+    : filters.userId && filters.motherId
     ? `AND (k.user_id = ${Number(filters.userId)} OR (LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.is_universal = 1))`
     : filters.userId
     ? `AND k.user_id = ${Number(filters.userId)}`

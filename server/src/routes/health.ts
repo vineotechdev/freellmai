@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getDb } from '../db/index.js';
 import { syncApiKeysFromPostgres, isPostgresConfigured } from '../db/postgres.js';
-import { isCompanyUniversalKeys } from '../services/tenant.js';
+import { isCompanyUniversalKeys, isCompanyPrivateMode, resolveMotherIdForUser } from '../services/tenant.js';
 import { checkKeyHealth, checkAllKeys, pollKeyQuota, supportsQuotaPolling } from '../services/health.js';
 import { getDegradationStatus } from '../services/degradation.js';
 import { runModelProbePass } from '../services/model-probe.js';
@@ -17,16 +17,24 @@ healthRouter.get('/', async (req: Request, res: Response) => {
   const db = getDb();
   const user = (req as any).user;
   const userId = user?.userId;
-  const motherId = user?.motherId || 'default';
+  let motherId = user?.motherId || 'default';
+  if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+    motherId = resolveMotherIdForUser(userId, motherId) || 'default';
+  }
 
   if (isPostgresConfigured()) {
     await syncApiKeysFromPostgres(db, userId, motherId);
   }
 
-  const isUniversal = isCompanyUniversalKeys(motherId);
+  const isPrivate = isCompanyPrivateMode(motherId);
+  const isUniversal = isPrivate || isCompanyUniversalKeys(motherId);
   let keyWhere = '';
   const keyParams: any[] = [];
-  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  if (isPrivate && !user?.isAdmin && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // In Private Mode, non-admins only see Universal keys
+    keyWhere = 'WHERE LOWER(mother_id) = LOWER(?) AND is_universal = 1';
+    keyParams.push(motherId);
+  } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     keyWhere = 'WHERE LOWER(mother_id) = LOWER(?)';
     keyParams.push(motherId);
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
@@ -102,9 +110,15 @@ healthRouter.post('/check/:keyId', async (req: Request, res: Response) => {
 
   const user = (req as any).user;
   const userId = user?.userId;
-  const motherId = user?.motherId || 'default';
-  const isUniversal = isCompanyUniversalKeys(motherId);
-  const row = isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
+  let motherId = user?.motherId || 'default';
+  if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+    motherId = resolveMotherIdForUser(userId, motherId) || 'default';
+  }
+  const isPrivate = isCompanyPrivateMode(motherId);
+  const isUniversal = isPrivate || isCompanyUniversalKeys(motherId);
+  const row = isPrivate && !user?.isAdmin && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
+    ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?) AND is_universal = 1').get(keyId, motherId)
+    : isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
     ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND LOWER(mother_id) = LOWER(?)').get(keyId, motherId)
     : userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default'
     ? getDb().prepare('SELECT 1 FROM api_keys WHERE id = ? AND (user_id = ? OR (LOWER(mother_id) = LOWER(?) AND is_universal = 1))').get(keyId, userId, motherId)

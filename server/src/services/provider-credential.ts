@@ -1,7 +1,7 @@
 import { getDb } from '../db/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { reserveMonthlyBudget } from './key-budget.js';
-import { isCompanyUniversalKeys } from './tenant.js';
+import { isCompanyUniversalKeys, isCompanyPrivateMode, resolveMotherIdForUser } from './tenant.js';
 
 export interface ReservedProviderCredential {
   id: number;
@@ -35,23 +35,47 @@ export function reserveProviderCredential(
   let keys: KeyRow[] = [];
 
   if (bound) {
+    if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+      motherId = resolveMotherIdForUser(userId, motherId);
+    }
+    const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
     let boundQuery = 'SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys WHERE id = ? AND enabled = 1 AND status IN (\'healthy\', \'unknown\')';
     const boundParams: any[] = [row.key_id];
-    if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      boundQuery += ' AND LOWER(mother_id) = LOWER(?) AND is_universal = 1';
+      boundParams.push(motherId);
+    } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       boundQuery += ' AND (LOWER(mother_id) = LOWER(?) OR mother_id IS NULL OR mother_id = \'default\')';
       boundParams.push(motherId);
     }
     keys = db.prepare(boundQuery).all(...boundParams) as KeyRow[];
-  } else {
-    if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+    // If bound key was personal or not universal, fall back to universal keys of company in Private Mode
+    if (keys.length === 0 && isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
-        const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
-        if (tRow?.mother_id) motherId = tRow.mother_id;
+        keys = db.prepare(`
+          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND is_universal = 1 AND enabled = 1 AND status IN ('healthy', 'unknown')
+          ORDER BY RANDOM()
+        `).all(row.platform, motherId) as KeyRow[];
       } catch {}
     }
-    const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  } else {
+    if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+      motherId = resolveMotherIdForUser(userId, motherId);
+    }
+    const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
+    const isUniversal = isPrivate || (motherId ? isCompanyUniversalKeys(motherId) : false);
 
-    if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      // In Private Mode, strictly pool ONLY Universal keys (is_universal = 1)
+      try {
+        keys = db.prepare(`
+          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND is_universal = 1 AND enabled = 1 AND status IN ('healthy', 'unknown')
+          ORDER BY RANDOM()
+        `).all(row.platform, motherId) as KeyRow[];
+      } catch {}
+    } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
@@ -85,8 +109,8 @@ export function reserveProviderCredential(
       } catch {}
     }
 
-    // 3. Fallback only if no specific tenant was requested
-    if (keys.length === 0 && (!motherId || motherId === 'default' || motherId === 'all') && !userId) {
+    // 3. Fallback only if no specific tenant was requested and NOT in private mode
+    if (keys.length === 0 && !isPrivate && (!motherId || motherId === 'default' || motherId === 'all') && !userId) {
       keys = db.prepare(`
         SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
         WHERE platform = ? AND (mother_id IS NULL OR mother_id = 'default') AND enabled = 1 AND status IN ('healthy', 'unknown')

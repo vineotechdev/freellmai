@@ -515,6 +515,7 @@ export interface TenantDetails {
   motherId: string;
   companyName: string | null;
   universalKeys: boolean;
+  privateMode?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -526,11 +527,80 @@ function ensureTenantDetailsTable(db: Db): void {
         mother_id TEXT PRIMARY KEY,
         company_name TEXT,
         universal_keys INTEGER NOT NULL DEFAULT 0,
+        private_mode INTEGER NOT NULL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       )
     `).run();
+    try {
+      const cols = db.prepare('PRAGMA table_info(ai_tenant_details)').all() as { name: string }[];
+      if (!cols.some(c => c.name === 'private_mode')) {
+        db.prepare('ALTER TABLE ai_tenant_details ADD COLUMN private_mode INTEGER NOT NULL DEFAULT 0').run();
+      }
+    } catch {}
   } catch {}
+}
+
+/**
+ * Checks whether Company AI Private Mode is enabled for a company (mother_id).
+ * In Private Mode, standard/retail employees cannot add personal API keys and
+ * must strictly use company-approved Universal Keys configured by administrators.
+ */
+export function isCompanyPrivateMode(motherId: string): boolean {
+  if (!motherId) return false;
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+  ensureTenantDetailsTable(db);
+
+  // 1. Primary check: ai_tenant_details table
+  try {
+    const row = db.prepare('SELECT private_mode FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as { private_mode: number | boolean } | undefined;
+    if (row && (row.private_mode === 1 || row.private_mode === true || String(row.private_mode) === 'true')) {
+      return true;
+    }
+    if (row && (row.private_mode === 0 || row.private_mode === false || String(row.private_mode) === 'false')) {
+      return false;
+    }
+  } catch {}
+
+  // 2. Fallback check: settings table
+  try {
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`private_mode_${normId}`) as { value: string } | undefined;
+    if (settingRow && (settingRow.value === 'true' || settingRow.value === '1')) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Resolves the mother_id associated with a user_id from database tables
+ * (users, tenant_api_keys, or api_keys) if not already provided or if 'default'.
+ */
+export function resolveMotherIdForUser(userId: number, currentMotherId?: string | null): string | null {
+  if (currentMotherId && currentMotherId !== 'default' && currentMotherId !== 'all') {
+    return normalizeMotherId(currentMotherId);
+  }
+  if (!userId) return currentMotherId || null;
+
+  const db = getDb();
+  try {
+    const uRow = db.prepare('SELECT mother_id FROM users WHERE id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+    if (uRow?.mother_id) return normalizeMotherId(uRow.mother_id);
+  } catch {}
+
+  try {
+    const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+    if (tRow?.mother_id) return normalizeMotherId(tRow.mother_id);
+  } catch {}
+
+  try {
+    const kRow = db.prepare('SELECT mother_id FROM api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
+    if (kRow?.mother_id) return normalizeMotherId(kRow.mother_id);
+  } catch {}
+
+  return currentMotherId || null;
 }
 
 /**
@@ -544,6 +614,11 @@ export function isCompanyUniversalKeys(motherId: string): boolean {
   const normId = normalizeMotherId(motherId);
   const db = getDb();
   ensureTenantDetailsTable(db);
+
+  // If private mode is enabled, universal keys are automatically required
+  if (isCompanyPrivateMode(normId)) {
+    return true;
+  }
 
   // 1. Primary check: ai_tenant_details table (Mother ID settings override individual settings!)
   try {
@@ -585,18 +660,71 @@ export function getCompanyTenantDetails(motherId: string): TenantDetails | null 
   const db = getDb();
   ensureTenantDetailsTable(db);
   try {
-    const row = db.prepare('SELECT mother_id, company_name, universal_keys, created_at, updated_at FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as any;
+    const row = db.prepare('SELECT mother_id, company_name, universal_keys, private_mode, created_at, updated_at FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as any;
     if (row) {
+      const privateMode = row.private_mode === 1 || row.private_mode === true || String(row.private_mode) === 'true';
       return {
         motherId: row.mother_id,
         companyName: row.company_name || null,
-        universalKeys: row.universal_keys === 1 || row.universal_keys === true || String(row.universal_keys) === 'true',
+        universalKeys: privateMode || row.universal_keys === 1 || row.universal_keys === true || String(row.universal_keys) === 'true',
+        privateMode,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
     }
   } catch {}
   return null;
+}
+
+/**
+ * Updates Company AI Private Mode policy across SQLite and PostgreSQL in ai_tenant_details.
+ */
+export async function setCompanyPrivateMode(motherId: string, enabled: boolean, companyName?: string): Promise<void> {
+  const normId = normalizeMotherId(motherId);
+  const db = getDb();
+  ensureTenantDetailsTable(db);
+  const flag = enabled ? 1 : 0;
+
+  try {
+    db.prepare(`
+      INSERT INTO ai_tenant_details (mother_id, company_name, private_mode, universal_keys, created_at, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(mother_id) DO UPDATE SET
+        private_mode = excluded.private_mode,
+        universal_keys = CASE WHEN excluded.private_mode = 1 THEN 1 ELSE ai_tenant_details.universal_keys END,
+        company_name = COALESCE(excluded.company_name, ai_tenant_details.company_name),
+        updated_at = datetime('now')
+    `).run(normId, companyName || null, flag, flag);
+
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(`private_mode_${normId}`, enabled ? 'true' : 'false');
+  } catch (err: any) {
+    console.warn('[tenant] Error setting private mode in SQLite:', err.message);
+  }
+
+  const p = getPostgresPool();
+  if (p) {
+    try {
+      try {
+        await p.query('ALTER TABLE ai_tenant_details ADD COLUMN IF NOT EXISTS private_mode BOOLEAN DEFAULT FALSE');
+      } catch {}
+      await p.query(`
+        INSERT INTO ai_tenant_details (mother_id, company_name, private_mode, universal_keys, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        ON CONFLICT (mother_id) DO UPDATE SET
+          private_mode = EXCLUDED.private_mode,
+          universal_keys = CASE WHEN EXCLUDED.private_mode = TRUE THEN TRUE ELSE ai_tenant_details.universal_keys END,
+          company_name = COALESCE(EXCLUDED.company_name, ai_tenant_details.company_name),
+          updated_at = NOW()
+      `, [normId, companyName || null, enabled, enabled]);
+
+      try {
+        await p.query('UPDATE company_settings SET enable_private_mode = $1 WHERE company_id::text = $2', [enabled, normId]);
+      } catch {}
+    } catch (err: any) {
+      console.warn('[PostgreSQL] Failed to sync private_mode to ai_tenant_details:', err.message);
+    }
+  }
 }
 
 /**

@@ -42,7 +42,7 @@ import { modelStatsKey, endpointScopeForBaseUrl } from '../lib/endpoint-scope.js
 import { isToolBenched } from '../lib/tool-capability.js';
 import { parseModelScope, scopeAllows } from '../lib/model-scope.js';
 import { getKeyQuotaHeadroom, inferQuotaPoolKey } from './provider-quota.js';
-import { isCompanyUniversalKeys } from './tenant.js';
+import { isCompanyUniversalKeys, isCompanyPrivateMode, resolveMotherIdForUser } from './tenant.js';
 import type { BaseProvider } from '../providers/base.js';
 import type { Platform } from '@freellmapi/shared/types.js';
 import type { Db } from '../db/types.js';
@@ -1073,18 +1073,22 @@ interface ScoredEntry {
 // floor after just one account's worth of tokens.
 function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): Map<string, number> {
   if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
-    try {
-      const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
-      if (tRow?.mother_id) motherId = tRow.mother_id;
-    } catch {}
+    motherId = resolveMotherIdForUser(userId, motherId) ?? undefined;
   }
-  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
-  const scopeKey = `${isUniversal ? 'univ' : (userId ?? '')}:${motherId ?? ''}`;
+  const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
+  const isUniversal = isPrivate || (motherId ? isCompanyUniversalKeys(motherId) : false);
+  const scopeKey = `${isPrivate ? 'priv' : isUniversal ? 'univ' : (userId ?? '')}:${motherId ?? ''}`;
   if (cachesEnabled() && keyCountsCache && keyCountsCache.db === db && keyCountsCache.scope === scopeKey && Date.now() - keyCountsCache.at < KEY_COUNTS_TTL_MS) {
     return keyCountsCache.map;
   }
   let rows: { platform: string; count: number }[] = [];
-  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // In Company Private Mode: strictly count ONLY Universal keys (is_universal = 1).
+    // Even if users entered private keys, completely ignore them!
+    rows = db.prepare(
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND is_universal = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
+    ).all(motherId) as { platform: string; count: number }[];
+  } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     rows = db.prepare(
       "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
     ).all(motherId) as { platform: string; count: number }[];
@@ -1615,14 +1619,21 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
 
   let allKeys: KeyRow[] = [];
   if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
-    try {
-      const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
-      if (tRow?.mother_id) motherId = tRow.mother_id;
-    } catch {}
+    motherId = resolveMotherIdForUser(userId, motherId) ?? undefined;
   }
-  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
+  const isUniversal = isPrivate || (motherId ? isCompanyUniversalKeys(motherId) : false);
 
-  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // 0. Company Private Mode:
+    // Strictly pool ONLY Universal keys for this company (is_universal = 1).
+    // Even if user previously entered personal keys, they are completely excluded!
+    try {
+      allKeys = db.prepare(
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND is_universal = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
+      ).all(entry.platform, motherId) as KeyRow[];
+    } catch {}
+  } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     // 1. Company Universal Keys:
     // Pool all keys for this company (LOWER(mother_id) = LOWER(?))
     // Multiple users' keys for this platform are pooled together and rotated!
@@ -1664,7 +1675,11 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   }
 
   if (allKeys.length === 0) {
-    diag?.push(`${label}: no enabled+healthy key for platform${userId ? ` (user ${userId})` : motherId ? ` (tenant ${motherId})` : ''}`);
+    if (isPrivate) {
+      diag?.push(`${label}: Company Private Mode is enabled. No universal key (is_universal = 1) is configured or healthy for platform ${entry.platform} under tenant ${motherId}. Personal keys are strictly prohibited.`);
+    } else {
+      diag?.push(`${label}: no enabled+healthy key for platform${userId ? ` (user ${userId})` : motherId ? ` (tenant ${motherId})` : ''}`);
+    }
     return null;
   }
 
@@ -1825,15 +1840,17 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
 
   const limits = { rpm: m.rpm_limit, rpd: m.rpd_limit, tpm: m.tpm_limit, tpd: m.tpd_limit };
   if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
-    try {
-      const tRow = db.prepare('SELECT mother_id FROM tenant_api_keys WHERE user_id = ? AND mother_id IS NOT NULL AND mother_id != \'default\' LIMIT 1').get(userId) as { mother_id: string } | undefined;
-      if (tRow?.mother_id) motherId = tRow.mother_id;
-    } catch {}
+    motherId = resolveMotherIdForUser(userId, motherId) ?? undefined;
   }
-  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
+  const isUniversal = isPrivate || (motherId ? isCompanyUniversalKeys(motherId) : false);
   let keysQuery = "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')";
   const params: any[] = [m.platform];
-  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // In Private Mode, only Universal keys count
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND is_universal = 1";
+    params.push(motherId);
+  } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     keysQuery += " AND LOWER(mother_id) = LOWER(?)";
     params.push(motherId);
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
@@ -1908,10 +1925,18 @@ export function routableKeyIdsForModel(modelDbId: number, motherId?: string, use
     .get(modelDbId) as { platform: string; model_id: string; key_id: number | null } | undefined;
   if (!m) return [];
 
-  const isUniversal = motherId ? isCompanyUniversalKeys(motherId) : false;
+  if (userId && (!motherId || motherId === 'default' || motherId === 'all')) {
+    motherId = resolveMotherIdForUser(userId, motherId) ?? undefined;
+  }
+  const isPrivate = motherId ? isCompanyPrivateMode(motherId) : false;
+  const isUniversal = isPrivate || (motherId ? isCompanyUniversalKeys(motherId) : false);
   let keysQuery = "SELECT id, model_scope_json FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown')";
   const params: any[] = [m.platform];
-  if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+  if (isPrivate && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // In Private Mode, only Universal keys are routable
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND is_universal = 1";
+    params.push(motherId);
+  } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     keysQuery += " AND LOWER(mother_id) = LOWER(?)";
     params.push(motherId);
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
