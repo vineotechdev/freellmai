@@ -16,8 +16,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import { ChevronDown, CircleAlert, Copy, ExternalLink, FlaskConical, Info, KeyRound, Layers, ListFilter, ListPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, Zap } from 'lucide-react'
+import { ChevronDown, CircleAlert, Copy, ExternalLink, FlaskConical, Info, KeyRound, Layers, ListFilter, ListPlus, MoreHorizontal, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, Zap } from 'lucide-react'
+import { Dialog, DialogPopup, DialogTitle } from '@/components/ui/dialog'
 import type { ApiKey, ApiKeyModel } from '../../../../shared/types'
 import { formatSqliteUtcToLocalTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
@@ -113,6 +115,8 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
   // the retired Providers page; everything else that page did already lived here.
   const [testTarget, setTestTarget] = useState<{ platform: string; keyId?: number; label: string } | null>(null)
   const [addModelTarget, setAddModelTarget] = useState<{ platform: string; keyId?: number } | null>(null)
+  const [deleteConfirmKey, setDeleteConfirmKey] = useState<ApiKey | null>(null)
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<ProviderGroup | null>(null)
   const { data: keys = [], isLoading } = useQuery<ApiKey[]>({
     queryKey: ['keys'],
     queryFn: () => apiFetch('/api/keys'),
@@ -562,6 +566,18 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                             {t('keys.routeViaProxy')}
                           </DropdownMenuCheckboxItem>
                         )}
+                        {group.keys.length > 0 && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => setDeleteGroupTarget(group)}
+                              className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                            >
+                              {group.keys.length === 1 ? t('common.delete') : t('keys.bulkDelete')}
+                              <Trash2 className="ml-auto size-3.5 text-destructive" />
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   <button
@@ -896,6 +912,44 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
                               >
                                 <Trash2 className="size-3" />
                               </ConfirmButton>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger
+                                  className={buttonVariants({ variant: 'ghost', size: 'icon-xs' })}
+                                  aria-label={t('keys.providerActions')}
+                                >
+                                  <MoreVertical className="size-3" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem onClick={() => startEditing(k)}>
+                                    {t('keys.editKey')}
+                                    <Pencil className="ml-auto size-3.5" />
+                                  </DropdownMenuItem>
+                                  {!k.keyless && (
+                                    <DropdownMenuItem onClick={() => setCopyKey({ id: k.id, maskedKey: k.maskedKey })}>
+                                      {t('keys.copyFullKey')}
+                                      <Copy className="ml-auto size-3.5" />
+                                    </DropdownMenuItem>
+                                  )}
+                                  {!k.keyless && !isSearchPlatform(k.platform) && (
+                                    <DropdownMenuItem onClick={() => setModelEditorKeyId(k.id)}>
+                                      {t('keys.editModels')}
+                                      <Layers className="ml-auto size-3.5" />
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => checkKey.mutate(k.id)} disabled={checkKey.isPending}>
+                                    {t('keys.checkNow')}
+                                    <RefreshCw className={`ml-auto size-3.5 ${isChecking ? 'animate-spin' : ''}`} />
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setDeleteConfirmKey(k)}
+                                    className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                                  >
+                                    {t('common.delete')}
+                                    <Trash2 className="ml-auto size-3.5 text-destructive" />
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           </div>
                           {k.autoHealthCheck === false && status === 'unknown' && !lastHealthError && (
@@ -1074,6 +1128,131 @@ export function ProviderList({ onAddKey }: { onAddKey: () => void }) {
           />
         ) : null
       })()}
+
+      {deleteConfirmKey !== null && (
+        <Dialog open onOpenChange={(open) => { if (!open) setDeleteConfirmKey(null) }}>
+          <DialogPopup maxWidth="max-w-md">
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="size-4" />
+              {t('common.delete')} {deleteConfirmKey.label || deleteConfirmKey.platform || 'Key'}
+            </DialogTitle>
+            <div className="mt-3 text-sm text-muted-foreground space-y-2">
+              <p>
+                Are you sure you want to delete this API key? This will permanently remove the credential from the system and cannot be undone.
+              </p>
+              <div className="rounded-lg border bg-muted/30 p-2.5 font-mono text-xs text-foreground">
+                {deleteConfirmKey.maskedKey}
+                {deleteConfirmKey.baseUrl && (
+                  <div className="text-[11px] text-muted-foreground truncate mt-1">
+                    {deleteConfirmKey.baseUrl}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteConfirmKey(null)}
+                disabled={deleteKey.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleteKey.isPending}
+                onClick={() => {
+                  deleteKey.mutate(deleteConfirmKey.id, {
+                    onSuccess: () => {
+                      toast.success('API key deleted successfully')
+                      setDeleteConfirmKey(null)
+                    },
+                    onError: (err: any) => {
+                      toast.error(err?.message || 'Failed to delete API key')
+                      setDeleteConfirmKey(null)
+                    }
+                  })
+                }}
+              >
+                {deleteKey.isPending ? 'Deleting…' : t('common.delete')}
+              </Button>
+            </div>
+          </DialogPopup>
+        </Dialog>
+      )}
+
+      {deleteGroupTarget !== null && (
+        <Dialog open onOpenChange={(open) => { if (!open) setDeleteGroupTarget(null) }}>
+          <DialogPopup maxWidth="max-w-md">
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="size-4" />
+              {t('common.delete')} {deleteGroupTarget.label || 'Keys'}
+            </DialogTitle>
+            <div className="mt-3 text-sm text-muted-foreground space-y-2">
+              <p>
+                {deleteGroupTarget.keys.length === 1
+                  ? 'Are you sure you want to delete this API key? This action cannot be undone.'
+                  : `Are you sure you want to delete all ${deleteGroupTarget.keys.length} API keys for ${deleteGroupTarget.label}? This will remove them permanently.`
+                }
+              </p>
+              <div className="max-h-40 overflow-y-auto space-y-1 rounded-lg border bg-muted/30 p-2 text-xs font-mono">
+                {deleteGroupTarget.keys.map(k => (
+                  <div key={k.id} className="flex items-center justify-between py-0.5">
+                    <span>{k.maskedKey}</span>
+                    {k.label && <span className="text-muted-foreground font-sans truncate max-w-[120px]">{k.label}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteGroupTarget(null)}
+                disabled={deleteKey.isPending || bulkKeys.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleteKey.isPending || bulkKeys.isPending}
+                onClick={() => {
+                  if (deleteGroupTarget.keys.length === 1) {
+                    deleteKey.mutate(deleteGroupTarget.keys[0].id, {
+                      onSuccess: () => {
+                        toast.success('API key deleted successfully')
+                        setDeleteGroupTarget(null)
+                      },
+                      onError: (err: any) => {
+                        toast.error(err?.message || 'Failed to delete API key')
+                        setDeleteGroupTarget(null)
+                      }
+                    })
+                  } else {
+                    bulkKeys.mutate({
+                      ids: deleteGroupTarget.keys.map(k => k.id),
+                      action: 'delete'
+                    }, {
+                      onSuccess: (res) => {
+                        toast.success(`Deleted ${res.done} keys${res.failed > 0 ? `, ${res.failed} failed` : ''}`)
+                        setDeleteGroupTarget(null)
+                      },
+                      onError: (err: any) => {
+                        toast.error(err?.message || 'Failed to delete keys')
+                        setDeleteGroupTarget(null)
+                      }
+                    })
+                  }
+                }}
+              >
+                {(deleteKey.isPending || bulkKeys.isPending) ? 'Deleting…' : t('common.delete')}
+              </Button>
+            </div>
+          </DialogPopup>
+        </Dialog>
+      )}
     </div>
   )
 }

@@ -231,7 +231,7 @@ export function createSession(userId: number): string {
   return token;
 }
 
-function isUserAdminRole(decoded: any): boolean {
+export function isUserAdminRole(decoded: any): boolean {
   if (!decoded) return false;
   if (
     decoded.isAdmin === true ||
@@ -442,14 +442,15 @@ export function validateSession(token: string | undefined | null): SessionUser |
       db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
       return null;
     }
+    const isFirstUser = row.user_id === 1;
     return {
       userId: row.user_id,
       email: row.email,
       motherId: row.mother_id || 'default',
       companyName: row.company_name || 'Default Company',
-      isAdmin: true,
-      role: 'admin',
-      roles: ['ROLE_ADMIN'],
+      isAdmin: isFirstUser,
+      role: isFirstUser ? 'admin' : 'user',
+      roles: isFirstUser ? ['ROLE_ADMIN'] : ['ROLE_USER'],
     };
   } catch {
     return null;

@@ -11,7 +11,7 @@ import { getSyncState } from '../services/catalog-sync.js';
 import { encrypt, decrypt, maskKey } from '../lib/crypto.js';
 import { parseKeysFromFile, stripJsoncComments, stripTrailingCommas } from '../lib/key-parser.js';
 import { assessProviderUrl } from '../lib/url-guard.js';
-import { verifyCredentials } from '../services/auth.js';
+import { verifyCredentials, isUserAdminRole } from '../services/auth.js';
 import { getActiveCooldownsForKeys, clearCooldownsForKey } from '../services/ratelimit.js';
 import { getMonthlyBudgetCaps, getMonthlyUsage, nextMonthResetAt } from '../services/key-budget.js';
 import { resolveCustomEndpointKey, customEndpointKeyIds, siblingEndpointKeyId, endpointHasCredential, normalizeGroupLabel, setCustomEndpointGroup } from '../services/custom-endpoint.js';
@@ -625,17 +625,7 @@ keysRouter.delete('/:id/cooldowns', (req: Request, res: Response) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPrivate && !isAdminUser) {
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot delete keys.' } });
@@ -876,33 +866,49 @@ keysRouter.post('/', async (req: Request, res: Response) => {
   }
 
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN') ||
-    user.roles?.some?.((r: any) => {
-      const s = String(r?.authority || r?.name || r).toUpperCase();
-      return s.includes('ADMIN') || s.includes('MANAGER');
-    })
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
-  if (isPrivate && !isAdminUser) {
-    res.status(403).json({
-      error: {
-        message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot add personal API keys; all AI operations must use company universal keys configured by administrators.',
-        type: 'private_mode_restricted',
-      }
-    });
-    return;
+  if (isPrivate) {
+    if (!isAdminUser) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot store or add API keys. All AI operations are restricted to company universal keys configured by administrators.',
+          type: 'private_mode_restricted',
+        }
+      });
+      return;
+    }
+
+    if (parsed.data.isUniversal === false) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is active. Private API keys cannot be stored. The company only permits Company Universal Keys configured for all members.',
+          type: 'private_keys_prohibited',
+        }
+      });
+      return;
+    }
   }
 
   if (isKeyless) {
+    if (isPrivate && !isAdminUser) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot enable keyless providers.',
+          type: 'private_mode_restricted',
+        }
+      });
+      return;
+    }
+    if (isPrivate && parsed.data.isUniversal === false) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is active. Private keys cannot be stored. Keyless connections must be Universal for the company.',
+          type: 'private_keys_prohibited',
+        }
+      });
+      return;
+    }
     const rows = userId
       ? db.prepare('SELECT id, encrypted_key, iv, auth_tag FROM api_keys WHERE platform = ? AND user_id = ? ORDER BY id')
           .all(platform, userId) as { id: number; encrypted_key: string; iv: string; auth_tag: string }[]
@@ -959,6 +965,7 @@ keysRouter.post('/', async (req: Request, res: Response) => {
   const isCompanyUniversal = isPrivate || isCompanyUniversalKeys(motherId);
   const isUniversal = isPrivate ? true : (parsed.data.isUniversal !== undefined ? parsed.data.isUniversal : isCompanyUniversal);
   const isUniversalNum = isUniversal ? 1 : 0;
+  const effectiveUserId = isUniversal ? null : userId;
 
   let keyId: number | bigint | undefined = 0;
   if (isPostgresConfigured()) {
@@ -972,7 +979,7 @@ keysRouter.post('/', async (req: Request, res: Response) => {
       enabled: 1,
       is_universal: isUniversal,
       mother_id: motherId,
-      user_id: userId,
+      user_id: effectiveUserId,
     });
     if (pgKeyId) {
       keyId = pgKeyId;
@@ -994,12 +1001,12 @@ keysRouter.post('/', async (req: Request, res: Response) => {
         is_universal = excluded.is_universal,
         mother_id = excluded.mother_id,
         user_id = excluded.user_id
-    `).run(keyId, platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+    `).run(keyId, platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, effectiveUserId);
   } else {
     const result = db.prepare(`
       INSERT INTO api_keys (platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, proxy_encrypted, proxy_iv, proxy_auth_tag, mother_id, user_id)
       VALUES (?, ?, ?, ?, ?, 'unknown', 1, ?, ?, ?, ?, ?, ?)
-    `).run(platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, userId);
+    `).run(platform, label ?? '', encrypted, iv, authTag, isUniversalNum, proxy.encrypted, proxy.iv, proxy.authTag, motherId, effectiveUserId);
     keyId = result.lastInsertRowid ?? 0;
   }
 
@@ -1572,26 +1579,27 @@ keysRouter.post('/custom', async (req: Request, res: Response) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
-  if (isPrivate && !isAdminUser) {
-    res.status(403).json({
-      error: {
-        message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot add custom endpoints or API keys.',
-        type: 'private_mode_restricted',
-      }
-    });
-    return;
+  if (isPrivate) {
+    if (!isAdminUser) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot add custom endpoints or API keys.',
+          type: 'private_mode_restricted',
+        }
+      });
+      return;
+    }
+    if ((parsed.data as any).isUniversal === false) {
+      res.status(403).json({
+        error: {
+          message: 'Company AI Private Mode is active. Private custom endpoints cannot be stored.',
+          type: 'private_keys_prohibited',
+        }
+      });
+      return;
+    }
   }
 
   // Credential-only add (#702): a relay hands out one key per plan, and pooling
@@ -1743,17 +1751,7 @@ keysRouter.post('/import', (req: Request, res: Response, next: NextFunction) => 
         motherId = resolveMotherIdForUser(userId, motherId) || 'default';
       }
       const isPrivate = isCompanyPrivateMode(motherId);
-      const isAdminUser = Boolean(
-        !user ||
-        user.isAdmin ||
-        user.is_admin ||
-        user.isSuperAdmin ||
-        user.is_super_admin ||
-        String(user.role || '').toLowerCase() === 'admin' ||
-        String(user.role || '').toLowerCase() === 'superadmin' ||
-        user.roles?.includes?.('ROLE_ADMIN') ||
-        user.roles?.includes?.('ROLE_SUPER_ADMIN')
-      );
+      const isAdminUser = Boolean(user && isUserAdminRole(user));
 
       if (isPrivate && !isAdminUser) {
         res.status(403).json({
@@ -1932,17 +1930,7 @@ keysRouter.post('/import-selected', async (req: Request, res: Response) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPrivate && !isAdminUser) {
     res.status(403).json({
@@ -2060,17 +2048,7 @@ keysRouter.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPrivate && !isAdminUser) {
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot delete keys.' } });
@@ -2179,17 +2157,7 @@ keysRouter.patch('/platform/:platform', (req: Request, res: Response) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPrivate && !isAdminUser) {
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot toggle keys.' } });
@@ -2467,17 +2435,7 @@ keysRouter.patch('/:id', (req: Request, res: Response, next: NextFunction) => {
     motherId = resolveMotherIdForUser(userId, motherId) || 'default';
   }
   const isPrivate = isCompanyPrivateMode(motherId);
-  const isAdminUser = Boolean(
-    !user ||
-    user.isAdmin ||
-    user.is_admin ||
-    user.isSuperAdmin ||
-    user.is_super_admin ||
-    String(user.role || '').toLowerCase() === 'admin' ||
-    String(user.role || '').toLowerCase() === 'superadmin' ||
-    user.roles?.includes?.('ROLE_ADMIN') ||
-    user.roles?.includes?.('ROLE_SUPER_ADMIN')
-  );
+  const isAdminUser = Boolean(user && isUserAdminRole(user));
 
   if (isPrivate && !isAdminUser) {
     res.status(403).json({ error: { message: 'Company AI Private Mode is enabled by your administrator. Standard users cannot modify keys.' } });
@@ -2502,6 +2460,10 @@ keysRouter.patch('/:id', (req: Request, res: Response, next: NextFunction) => {
   }
 
   const { enabled, label, isUniversal: updateIsUniversal, modelScope, proxyUrl, key, monthlyRequestCap, monthlyTokenCap, groupLabel } = parsed.data;
+  if (isPrivate && updateIsUniversal === false) {
+    res.status(403).json({ error: { message: 'Company AI Private Mode is active. Keys cannot be converted to private keys.' } });
+    return;
+  }
   const updates: string[] = [];
   const values: (string | number | null)[] = [];
   let changedKey: string | undefined;

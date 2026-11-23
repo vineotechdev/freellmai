@@ -309,12 +309,18 @@ export function signJwtToken(payload: {
   motherId: string;
   companyName: string;
   roles?: string;
+  role?: string;
+  isAdmin?: boolean;
+  is_admin?: boolean;
   designation?: string;
   website?: string;
 }): string {
   const normMotherId = normalizeMotherId(payload.motherId);
   const normalizedEmail = payload.email.trim().toLowerCase();
   const motherIdVal = isNaN(Number(normMotherId)) ? normMotherId : Number(normMotherId);
+
+  const isAdminFlag = Boolean(payload.isAdmin || payload.is_admin || payload.role === 'admin' || (payload.roles && payload.roles.includes('ADMIN')));
+  const defaultRoles = isAdminFlag ? 'ROLE_ADMIN,ROLE_USER' : 'ROLE_USER';
 
   // Exact claim structure matching PolarList backend JwtTokenProvider.java
   const claims: Record<string, any> = {
@@ -328,7 +334,10 @@ export function signJwtToken(payload: {
     type: 'access',
     tv: 0,
     base_url: 'https://polardata.polarlist.in',
-    roles: payload.roles || 'ROLE_USER,ROLE_ADMIN',
+    roles: payload.roles || defaultRoles,
+    role: isAdminFlag ? 'admin' : (payload.role || 'user'),
+    isAdmin: isAdminFlag,
+    is_admin: isAdminFlag,
     website: payload.website || 'https://ai.polarlist.in',
   };
   if (payload.designation) {

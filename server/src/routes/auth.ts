@@ -484,12 +484,25 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     clearFailures(email);
     const sessionToken = createSession(localUser.userId);
+    const rawData = data as any;
+    const isAdminUser = Boolean(
+      rawData.isAdmin ||
+      rawData.is_admin ||
+      rawData.isSuperAdmin ||
+      rawData.is_super_admin ||
+      String(rawData.role || '').toLowerCase() === 'admin' ||
+      (Array.isArray(rawData.roles) && rawData.roles.some((r: any) => String(r).toUpperCase().includes('ADMIN')))
+    );
     const jwtToken = data.jwtToken || data.token || signJwtToken({
       userId: localUser.userId,
       email: normEmail,
       motherId: motherIdStr,
       companyName: compName,
       website: data.website || website,
+      role: isAdminUser ? 'admin' : (rawData.role || 'user'),
+      roles: Array.isArray(rawData.roles) ? rawData.roles.join(',') : rawData.roles,
+      isAdmin: isAdminUser,
+      is_admin: isAdminUser,
     });
     const apiKey = getUserApiKey(localUser.userId, motherIdStr, compName);
 
