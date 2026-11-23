@@ -233,9 +233,38 @@ export function createSession(userId: number): string {
 
 function isUserAdminRole(decoded: any): boolean {
   if (!decoded) return false;
-  if (decoded.isAdmin === true || decoded.is_admin === true || decoded.isSuperAdmin === true || decoded.is_super_admin === true) {
+  if (
+    decoded.isAdmin === true ||
+    decoded.is_admin === true ||
+    decoded.isSuperAdmin === true ||
+    decoded.is_super_admin === true ||
+    decoded.isCompanyAdmin === true ||
+    decoded.is_company_admin === true
+  ) {
     return true;
   }
+
+  // Nested role object (from Spring Boot RoleResponse, Role.java, etc.)
+  if (decoded.role && typeof decoded.role === 'object') {
+    const r = decoded.role;
+    if (
+      r.isAdmin === true ||
+      r.is_admin === true ||
+      r.isSuperAdmin === true ||
+      r.is_super_admin === true ||
+      r.canManageUsers === true ||
+      r.can_manage_users === true ||
+      r.canManageCompany === true ||
+      r.can_manage_company === true
+    ) {
+      return true;
+    }
+    const rName = String(r.name || r.code || '').toUpperCase().trim();
+    if (rName.includes('ADMIN') || rName.includes('MANAGER') || rName.includes('OWNER')) {
+      return true;
+    }
+  }
+
   const roleStr = typeof decoded.roles === 'string'
     ? decoded.roles
     : (typeof decoded.role === 'string' ? decoded.role : '');
@@ -248,23 +277,29 @@ function isUserAdminRole(decoded: any): boolean {
              trimmed === 'ADMIN' ||
              trimmed === 'SUPER_ADMIN' ||
              trimmed === 'ROLE_HR_MANAGER' ||
-             trimmed === 'HR_MANAGER';
+             trimmed === 'HR_MANAGER' ||
+             trimmed.includes('ADMIN') ||
+             trimmed.includes('MANAGER');
     })) {
       return true;
     }
   }
+  if (typeof decoded.hrmsRole === 'string') {
+    const hr = decoded.hrmsRole.toUpperCase().trim();
+    if (hr.includes('ADMIN') || hr.includes('MANAGER')) return true;
+  }
   if (Array.isArray(decoded.roles)) {
     if (decoded.roles.some((r: any) => {
-      const s = String(r?.authority || r?.name || r).toUpperCase().trim();
-      return s === 'ROLE_ADMIN' || s === 'ROLE_SUPER_ADMIN' || s === 'ADMIN' || s === 'SUPER_ADMIN' || s === 'ROLE_HR_MANAGER' || s === 'HR_MANAGER';
+      const s = String(r?.authority || r?.name || r?.code || r).toUpperCase().trim();
+      return s.includes('ADMIN') || s.includes('MANAGER') || s.includes('OWNER');
     })) {
       return true;
     }
   }
   if (Array.isArray(decoded.authorities)) {
     if (decoded.authorities.some((a: any) => {
-      const s = String(a?.authority || a?.name || a).toUpperCase().trim();
-      return s === 'ROLE_ADMIN' || s === 'ROLE_SUPER_ADMIN' || s === 'ADMIN' || s === 'SUPER_ADMIN' || s === 'ROLE_HR_MANAGER' || s === 'HR_MANAGER';
+      const s = String(a?.authority || a?.name || a?.code || a).toUpperCase().trim();
+      return s.includes('ADMIN') || s.includes('MANAGER') || s.includes('OWNER');
     })) {
       return true;
     }
