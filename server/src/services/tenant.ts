@@ -641,19 +641,22 @@ export function isCompanyUniversalKeys(motherId: string): boolean {
     }
   } catch {}
 
-  // 2. Secondary check: tenant_api_keys
+  // 2. Fallback to settings table
   try {
-    const row = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) AND universal_keys = 1 LIMIT 1').get(normId) as { universal_keys: number } | undefined;
-    if (row && Number(row.universal_keys) === 1) {
-      return true;
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`universal_keys_${normId}`) as { value: string } | undefined;
+    if (settingRow) {
+      return settingRow.value === 'true' || settingRow.value === '1';
     }
   } catch {}
 
-  // 3. Fallback to settings table
+  // 3. Secondary check: tenant_api_keys
   try {
-    const settingRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(`universal_keys_${normId}`) as { value: string } | undefined;
-    if (settingRow && (settingRow.value === 'true' || settingRow.value === '1')) {
+    const row = db.prepare('SELECT universal_keys FROM tenant_api_keys WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(normId) as { universal_keys: number | boolean } | undefined;
+    if (row && (row.universal_keys === 1 || row.universal_keys === true || String(row.universal_keys) === 'true')) {
       return true;
+    }
+    if (row && (row.universal_keys === 0 || row.universal_keys === false || String(row.universal_keys) === 'false')) {
+      return false;
     }
   } catch {}
 

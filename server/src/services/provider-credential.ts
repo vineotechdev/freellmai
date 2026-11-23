@@ -77,19 +77,28 @@ export function reserveProviderCredential(
       } catch {}
     } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
-        keys = db.prepare(`
-          SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND enabled = 1 AND status IN ('healthy', 'unknown')
-          ORDER BY RANDOM()
-        `).all(row.platform, motherId) as KeyRow[];
+        if (userId) {
+          keys = db.prepare(`
+            SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+            WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) AND enabled = 1 AND status IN ('healthy', 'unknown')
+            ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), RANDOM()
+          `).all(row.platform, motherId, userId, userId) as KeyRow[];
+        } else {
+          keys = db.prepare(`
+            SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
+            WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND enabled = 1 AND status IN ('healthy', 'unknown')
+            ORDER BY is_universal DESC, RANDOM()
+          `).all(row.platform, motherId) as KeyRow[];
+        }
       } catch {}
     } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      // Universal Mode is deactivated: user gets ONLY their own keys
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) AND enabled = 1 AND status IN ('healthy', 'unknown')
-          ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), RANDOM()
-        `).all(row.platform, motherId, userId, userId) as KeyRow[];
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND user_id = ? AND enabled = 1 AND status IN ('healthy', 'unknown')
+          ORDER BY RANDOM()
+        `).all(row.platform, motherId, userId) as KeyRow[];
       } catch {}
     } else if (userId) {
       try {
@@ -103,7 +112,7 @@ export function reserveProviderCredential(
       try {
         keys = db.prepare(`
           SELECT id, encrypted_key, iv, auth_tag, base_url FROM api_keys
-          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1) AND enabled = 1 AND status IN ('healthy', 'unknown')
+          WHERE platform = ? AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL AND is_universal = 0 AND enabled = 1 AND status IN ('healthy', 'unknown')
           ORDER BY RANDOM()
         `).all(row.platform, motherId) as KeyRow[];
       } catch {}

@@ -1089,12 +1089,20 @@ function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): 
       "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND is_universal = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
     ).all(motherId) as { platform: string; count: number }[];
   } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    rows = db.prepare(
-      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
-    ).all(motherId) as { platform: string; count: number }[];
+    // In Company Universal Mode: user's personal keys plus shared universal keys
+    if (userId) {
+      rows = db.prepare(
+        "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) GROUP BY platform"
+      ).all(motherId, userId) as { platform: string; count: number }[];
+    } else {
+      rows = db.prepare(
+        "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) GROUP BY platform"
+      ).all(motherId) as { platform: string; count: number }[];
+    }
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    // Universal Mode is deactivated: standard users use ONLY their personal keys
     rows = db.prepare(
-      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) GROUP BY platform"
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id = ? GROUP BY platform"
     ).all(motherId, userId) as { platform: string; count: number }[];
   } else if (userId) {
     rows = db.prepare(
@@ -1102,7 +1110,7 @@ function usableKeyCountsByPlatform(db: Db, userId?: number, motherId?: string): 
     ).all(userId) as { platform: string; count: number }[];
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
     rows = db.prepare(
-      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1) GROUP BY platform"
+      "SELECT platform, COUNT(*) AS count FROM api_keys WHERE enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL AND is_universal = 0 GROUP BY platform"
     ).all(motherId) as { platform: string; count: number }[];
   } else {
     rows = db.prepare(
@@ -1634,35 +1642,40 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
       ).all(entry.platform, motherId) as KeyRow[];
     } catch {}
   } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    // 1. Company Universal Keys:
-    // Pool all keys for this company (LOWER(mother_id) = LOWER(?))
-    // Multiple users' keys for this platform are pooled together and rotated!
-    // Strictly company-isolated: never touches any other company's keys.
+    // 1. Company Universal Keys Mode:
+    // User's own keys are prioritized and used FIRST!
+    // If user's own keys are absent or exhausted, fall back to shared universal keys.
     try {
-      allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?)"
-      ).all(entry.platform, motherId) as KeyRow[];
+      if (userId) {
+        allKeys = db.prepare(
+          "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), id ASC"
+        ).all(entry.platform, motherId, userId, userId) as KeyRow[];
+      } else {
+        allKeys = db.prepare(
+          "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) ORDER BY is_universal DESC, id ASC"
+        ).all(entry.platform, motherId) as KeyRow[];
+      }
     } catch {}
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    // 2. User-level keys PLUS any universal keys from the same company:
-    // Sort so user's own keys are tried first, then shared universal keys.
+    // 2. Universal Mode Deactivated:
+    // Standard users use ONLY their own personal keys. Universal keys are NOT used!
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) ORDER BY (CASE WHEN user_id = ? THEN 0 ELSE 1 END), id ASC"
-      ).all(entry.platform, motherId, userId, userId) as KeyRow[];
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id = ? ORDER BY id ASC"
+      ).all(entry.platform, motherId, userId) as KeyRow[];
     } catch {}
   } else if (userId) {
     // 3. Strict User-level keys (each user has their own separate keys)
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ?"
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND user_id = ? ORDER BY id ASC"
       ).all(entry.platform, userId) as KeyRow[];
     } catch {}
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    // 4. Company-level keys for requests without user context
+    // 4. Company-level keys for requests without user context (universal mode OFF)
     try {
       allKeys = db.prepare(
-        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)"
+        "SELECT * FROM api_keys WHERE platform = ? AND enabled = 1 AND status IN ('healthy', 'unknown') AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL AND is_universal = 0 ORDER BY id ASC"
       ).all(entry.platform, motherId) as KeyRow[];
     } catch {}
   } else {
@@ -1851,16 +1864,22 @@ export function hasOtherUsableKey(modelDbId: number, excludingKeyId: number, ski
     keysQuery += " AND LOWER(mother_id) = LOWER(?) AND is_universal = 1";
     params.push(motherId);
   } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?)";
-    params.push(motherId);
+    if (userId) {
+      keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+      params.push(motherId, userId);
+    } else {
+      keysQuery += " AND LOWER(mother_id) = LOWER(?)";
+      params.push(motherId);
+    }
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+    // Universal Mode Deactivated: user gets ONLY their own keys
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND user_id = ?";
     params.push(motherId, userId);
   } else if (userId) {
     keysQuery += " AND user_id = ?";
     params.push(userId);
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)";
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL AND is_universal = 0";
     params.push(motherId);
   } else {
     keysQuery += " AND user_id IS NULL";
@@ -1937,16 +1956,22 @@ export function routableKeyIdsForModel(modelDbId: number, motherId?: string, use
     keysQuery += " AND LOWER(mother_id) = LOWER(?) AND is_universal = 1";
     params.push(motherId);
   } else if (isUniversal && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?)";
-    params.push(motherId);
+    if (userId) {
+      keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+      params.push(motherId, userId);
+    } else {
+      keysQuery += " AND LOWER(mother_id) = LOWER(?)";
+      params.push(motherId);
+    }
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1)";
+    // Universal Mode Deactivated: user gets ONLY their own keys
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND user_id = ?";
     params.push(motherId, userId);
   } else if (userId) {
     keysQuery += " AND user_id = ?";
     params.push(userId);
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND (user_id IS NULL OR is_universal = 1)";
+    keysQuery += " AND LOWER(mother_id) = LOWER(?) AND user_id IS NULL AND is_universal = 0";
     params.push(motherId);
   }
 

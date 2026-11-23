@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { PageHeader } from '@/components/page-header'
 import type { ApiKey, Platform } from '../../../shared/types'
@@ -88,6 +89,32 @@ export default function KeysPage() {
     },
   })
 
+  const togglePrivateMode = useMutation({
+    mutationFn: (enable: boolean) =>
+      apiFetch('/api/company/private-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enablePrivateMode: enable, motherId: companySettings?.motherId }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-settings'] })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+    },
+  })
+
+  const toggleUniversalKeys = useMutation({
+    mutationFn: (enable: boolean) =>
+      apiFetch('/api/keys/company-settings', {
+        method: 'POST',
+        body: JSON.stringify({ universalKeys: enable, motherId: companySettings?.motherId }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-settings'] })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+    },
+  })
+
   return (
     <div>
       <PageHeader
@@ -142,10 +169,38 @@ export default function KeysPage() {
 
         {tab === 'providers' && (
           <>
+            {companySettings?.isAdmin && (
+              <div className="p-3 rounded-lg border border-border bg-card text-xs flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-6">
+                  <span className="font-semibold text-foreground">Admin Policy Controls:</span>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <Switch
+                      size="sm"
+                      checked={Boolean(companySettings?.privateMode)}
+                      onCheckedChange={(checked) => togglePrivateMode.mutate(checked)}
+                      disabled={togglePrivateMode.isPending}
+                    />
+                    <span>Company Private Mode</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <Switch
+                      size="sm"
+                      checked={Boolean(companySettings?.universalKeys)}
+                      onCheckedChange={(checked) => toggleUniversalKeys.mutate(checked)}
+                      disabled={toggleUniversalKeys.isPending}
+                    />
+                    <span>Universal Keys Mode</span>
+                  </label>
+                </div>
+                <span className="text-muted-foreground">
+                  Tenant: <strong className="text-foreground">{companySettings.companyName || 'Company'}</strong>
+                </span>
+              </div>
+            )}
             {companySettings?.privateMode && (
               <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/40 text-xs text-foreground">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold px-2 py-0.5 rounded bg-foreground text-background">COMPANY PRIVATE MODE ACTIVE</span>
+                  <span className="font-semibold px-2 py-0.5 rounded bg-black text-white dark:bg-white dark:text-black">COMPANY PRIVATE MODE ACTIVE</span>
                   <span>
                     {companySettings.isAdmin
                       ? `Private mode is enabled for ${companySettings.companyName || 'your company'}. Standard members cannot add or store personal keys.`
@@ -157,7 +212,7 @@ export default function KeysPage() {
             {companySettings?.universalKeys && !companySettings?.privateMode && (
               <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/40 text-xs text-foreground">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold px-2 py-0.5 rounded bg-foreground text-background">COMPANY UNIVERSAL MODE ACTIVE</span>
+                  <span className="font-semibold px-2 py-0.5 rounded bg-black text-white dark:bg-white dark:text-black">COMPANY UNIVERSAL MODE ACTIVE</span>
                   <span>All universal keys are pooled and shared across all members of <strong className="text-foreground">{companySettings.companyName || 'your company'}</strong>.</span>
                 </div>
               </div>

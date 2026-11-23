@@ -68,13 +68,18 @@ export function buildModelListing(userId?: number, motherId?: string): ModelList
     // In Private Mode, ONLY Universal keys count towards model availability
     userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.is_universal = 1`;
   } else if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId})`;
+    if (userId) {
+      userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND (k.user_id = ${Number(userId)} OR k.is_universal = 1)`;
+    } else {
+      userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId})`;
+    }
   } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND (k.user_id = ${Number(userId)} OR (LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.is_universal = 1))`;
+    // Universal Mode Deactivated: user can ONLY use their own private keys
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.user_id = ${Number(userId)}`;
   } else if (userId) {
     userKeyFilter = ` AND k.user_id = ${Number(userId)}`;
   } else if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND (k.user_id IS NULL OR k.is_universal = 1)`;
+    userKeyFilter = ` AND LOWER(k.mother_id) = LOWER(${escapedMotherId}) AND k.user_id IS NULL AND k.is_universal = 0`;
   }
   const availableExpr = `
     (CASE WHEN m.enabled = 1 AND EXISTS (

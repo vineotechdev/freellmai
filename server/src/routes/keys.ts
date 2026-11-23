@@ -454,8 +454,9 @@ keysRouter.get('/', async (req: Request, res: Response) => {
   } else if (isUniversal) {
     // Company Universal Keys enabled: pool all keys belonging to this company (strictly isolated by mother_id)
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
-  } else if (userId) {
-    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND (user_id = ? OR is_universal = 1) ORDER BY created_at DESC').all(motherId, userId) as any[];
+  } else if (userId && !user?.isAdmin) {
+    // Universal Mode deactivated: standard non-admin users only see their own keys
+    rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) AND user_id = ? ORDER BY created_at DESC').all(motherId, userId) as any[];
   } else {
     rows = db.prepare('SELECT * FROM api_keys WHERE LOWER(mother_id) = LOWER(?) ORDER BY created_at DESC').all(motherId) as any[];
   }
@@ -2404,7 +2405,7 @@ const handleUpdateCompanyPrivateMode = async (req: Request, res: Response) => {
     companyName: companyName || null,
     privateMode: enablePrivateMode,
     enablePrivateMode,
-    universalKeys: true,
+    universalKeys: enablePrivateMode ? true : isCompanyUniversalKeys(motherId),
     message: enablePrivateMode
       ? `Company AI Private Mode enabled for ${companyName} (${motherId}). Retail users are restricted to Universal keys.`
       : `Company AI Private Mode disabled for ${companyName} (${motherId}). Individual keys are permitted.`

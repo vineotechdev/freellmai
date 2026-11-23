@@ -414,23 +414,39 @@ export async function syncAllTablesFromPostgres(db: Db): Promise<void> {
           mother_id TEXT PRIMARY KEY,
           company_name TEXT,
           universal_keys INTEGER NOT NULL DEFAULT 0,
+          private_mode INTEGER NOT NULL DEFAULT 0,
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now'))
         )
       `).run();
-      const tenantDetailsRes = await p.query('SELECT mother_id, company_name, universal_keys, created_at, updated_at FROM ai_tenant_details');
+      try {
+        const cols = db.prepare('PRAGMA table_info(ai_tenant_details)').all() as { name: string }[];
+        if (!cols.some(c => c.name === 'private_mode')) {
+          db.prepare('ALTER TABLE ai_tenant_details ADD COLUMN private_mode INTEGER NOT NULL DEFAULT 0').run();
+        }
+      } catch {}
+      const tenantDetailsRes = await p.query('SELECT mother_id, company_name, universal_keys, private_mode, created_at, updated_at FROM ai_tenant_details');
       for (const row of tenantDetailsRes.rows) {
         const createdAtStr = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
         const updatedAtStr = row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at ? String(row.updated_at) : null);
         const univFlag = (row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true') ? 1 : 0;
+        const privFlag = (row.private_mode === true || row.private_mode === 1 || String(row.private_mode) === 'true') ? 1 : 0;
         db.prepare(`
-          INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, created_at, updated_at)
-          VALUES (?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))
+          INSERT INTO ai_tenant_details (mother_id, company_name, universal_keys, private_mode, created_at, updated_at)
+          VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')))
           ON CONFLICT(mother_id) DO UPDATE SET
             company_name = excluded.company_name,
             universal_keys = excluded.universal_keys,
+            private_mode = excluded.private_mode,
             updated_at = excluded.updated_at
-        `).run(row.mother_id, row.company_name || 'Default Company', univFlag, createdAtStr, updatedAtStr);
+        `).run(row.mother_id, row.company_name || 'Default Company', univFlag, privFlag, createdAtStr, updatedAtStr);
+
+        try {
+          db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .run(`universal_keys_${String(row.mother_id).trim().toLowerCase()}`, univFlag === 1 ? 'true' : 'false');
+          db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .run(`private_mode_${String(row.mother_id).trim().toLowerCase()}`, privFlag === 1 ? 'true' : 'false');
+        } catch {}
       }
     } catch (tdErr: any) {
       console.warn('[PostgreSQL] Could not sync ai_tenant_details:', tdErr.message);
@@ -483,20 +499,18 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
     let isPriv = false;
     if (motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
       try {
-        // Query PostgreSQL ai_tenant_details and company_settings for central universal and private_mode settings
+        // Query PostgreSQL ai_tenant_details for central universal and private_mode settings
         const tdRow = await p.query(`
-          SELECT t.universal_keys, t.private_mode, t.company_name,
-                 cs.enable_private_mode, cs.universal_ai_keys
-            FROM ai_tenant_details t
-            FULL OUTER JOIN company_settings cs ON cs.company_id::text = t.mother_id
-           WHERE LOWER(COALESCE(t.mother_id, cs.company_id::text)) = LOWER($1)
+          SELECT universal_keys, private_mode, company_name
+            FROM ai_tenant_details
+           WHERE LOWER(mother_id) = LOWER($1)
            LIMIT 1
         `, [motherId]);
 
         if (tdRow.rows.length > 0) {
           const row = tdRow.rows[0];
-          isPriv = row.private_mode === true || row.private_mode === 1 || String(row.private_mode) === 'true' || row.enable_private_mode === true || row.enable_private_mode === 1 || String(row.enable_private_mode) === 'true';
-          isUniv = isPriv || row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true' || row.universal_ai_keys === true || row.universal_ai_keys === 1 || String(row.universal_ai_keys) === 'true';
+          isPriv = row.private_mode === true || row.private_mode === 1 || String(row.private_mode) === 'true';
+          isUniv = row.universal_keys === true || row.universal_keys === 1 || String(row.universal_keys) === 'true';
           const compName = row.company_name || null;
           try {
             db.prepare(`
@@ -511,25 +525,35 @@ export async function syncApiKeysFromPostgres(db: Db, userId?: number | null, mo
 
             db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
               .run(`private_mode_${String(motherId).trim().toLowerCase()}`, isPriv ? 'true' : 'false');
+            db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+              .run(`universal_keys_${String(motherId).trim().toLowerCase()}`, isUniv ? 'true' : 'false');
           } catch {}
         } else {
           // Fallback to SQLite check
           const sRow = db.prepare('SELECT universal_keys, private_mode FROM ai_tenant_details WHERE LOWER(mother_id) = LOWER(?) LIMIT 1').get(motherId) as any;
           if (sRow) {
             isPriv = sRow.private_mode === 1 || sRow.private_mode === true || String(sRow.private_mode) === 'true';
-            isUniv = isPriv || sRow.universal_keys === 1 || sRow.universal_keys === true || String(sRow.universal_keys) === 'true';
+            isUniv = sRow.universal_keys === 1 || sRow.universal_keys === true || String(sRow.universal_keys) === 'true';
           }
         }
-      } catch {}
+      } catch (err: any) {
+        console.warn('[PostgreSQL] Could not fetch tenant settings in syncApiKeysFromPostgres:', err.message);
+      }
     }
 
     let query = 'SELECT id, platform, label, encrypted_key, iv, auth_tag, status, enabled, is_universal, mother_id, user_id, last_healthy_at, last_health_error, created_at FROM ai_api_keys';
     const params: any[] = [];
-    if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+    if (isPriv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      // In Private Mode, only Universal keys count
+      query += ' WHERE LOWER(mother_id) = LOWER($1) AND is_universal = TRUE';
+      params.push(motherId);
+    } else if (isUniv && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
+      // In Universal Mode, pool all company keys (user can also query their own)
       query += ' WHERE LOWER(mother_id) = LOWER($1)';
       params.push(motherId);
     } else if (userId && motherId && motherId !== 'all' && motherId.toLowerCase() !== 'default') {
-      query += ' WHERE LOWER(mother_id) = LOWER($1) AND (user_id = $2 OR is_universal = TRUE)';
+      // Universal Mode is deactivated: user gets ONLY their own keys
+      query += ' WHERE LOWER(mother_id) = LOWER($1) AND user_id = $2';
       params.push(motherId, userId);
     } else if (userId) {
       query += ' WHERE user_id = $1';
